@@ -20,6 +20,7 @@ export default function KnowledgeCenterPage() {
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
   const [books, setBooks] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -47,7 +48,6 @@ export default function KnowledgeCenterPage() {
           
           setBooks(readyBooks)
           
-          // Auto-select if only one book
           if (readyBooks.length === 1 && !selectedBookId) {
             setSelectedBookId(readyBooks[0].id)
           }
@@ -59,7 +59,6 @@ export default function KnowledgeCenterPage() {
     
     loadBooksData()
     
-    // Check for book ID in URL
     const bookId = searchParams.get('book')
     if (bookId) {
       setSelectedBookId(bookId)
@@ -72,40 +71,6 @@ export default function KnowledgeCenterPage() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
-  const loadChatHistory = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const backendUrl = getBackendUrl()
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) return
-
-      const response = await fetch(
-        `${backendUrl}/api/chat/history${selectedBookId ? `?book_id=${selectedBookId}` : ''}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`
-          }
-        }
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        const formattedMessages = data.messages.map((msg: any) => ({
-          role: msg.role,
-          content: msg.content,
-          sources: msg.sources,
-          timestamp: new Date(msg.created_at)
-        }))
-        setMessages(formattedMessages.reverse())
-      }
-    } catch (error) {
-      console.error('Error loading chat history:', error)
-    }
   }
 
   useEffect(() => {
@@ -203,7 +168,6 @@ export default function KnowledgeCenterPage() {
       
     } catch (error: any) {
       setError(error.message || 'Failed to send message')
-      // Remove the user message on error
       setMessages(prev => prev.slice(0, -1))
     } finally {
       setLoading(false)
@@ -211,31 +175,40 @@ export default function KnowledgeCenterPage() {
   }
 
   return (
-    <div className="flex flex-col sm:flex-row h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+    <div className="flex h-screen bg-white text-gray-900">
       {/* Sidebar */}
-      <div className="w-full sm:w-64 lg:w-72 bg-white border-b sm:border-b-0 sm:border-r border-gray-200 flex flex-col flex-shrink-0">
-        <div className="p-4 border-b border-gray-200">
-          <Link
-            href="/dashboard"
-            className="text-indigo-600 hover:text-indigo-700 text-sm font-medium mb-2 inline-flex items-center"
+      <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 overflow-hidden border-r border-gray-200 bg-white flex flex-col flex-shrink-0`}>
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+            </Link>
+            <h2 className="text-base font-semibold text-gray-900">Knowledge Center</h2>
+          </div>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden text-gray-500 hover:text-gray-700"
           >
-            <svg className="mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            Back to Dashboard
-          </Link>
-          <h2 className="text-lg sm:text-xl font-bold text-gray-900 mt-2">Knowledge Center</h2>
+          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
           <div className="mb-4">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-xs font-medium text-gray-700 mb-2 uppercase tracking-wide">
               Select Book
             </label>
             <select
               value={selectedBookId || ''}
               onChange={(e) => setSelectedBookId(e.target.value || null)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
             >
               <option value="">All Books</option>
               {books.map((book) => (
@@ -247,16 +220,13 @@ export default function KnowledgeCenterPage() {
           </div>
 
           {books.length === 0 && (
-            <div className="text-center text-sm text-gray-600 mt-8 p-4 bg-gray-50 rounded-lg">
-              <p className="font-medium text-gray-900 mb-2">No books available.</p>
+            <div className="text-center text-sm text-gray-500 mt-8 p-4">
+              <p className="mb-2">No books available.</p>
               <Link
                 href="/dashboard/upload"
-                className="text-indigo-600 hover:text-indigo-700 font-medium inline-flex items-center"
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
               >
-                Upload a book
-                <svg className="ml-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+                Upload a book →
               </Link>
             </div>
           )}
@@ -264,10 +234,20 @@ export default function KnowledgeCenterPage() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-white">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 p-4 shadow-sm">
-          <h1 className="text-lg sm:text-xl font-bold text-gray-900">
+        <div className="border-b border-gray-200 px-4 py-3 flex items-center justify-between bg-white">
+          {!sidebarOpen && (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden text-gray-600 hover:text-gray-900 mr-2"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          )}
+          <h1 className="text-sm font-medium text-gray-900">
             {selectedBookId 
               ? books.find(b => b.id === selectedBookId)?.title || 'Chat'
               : 'Chat with All Books'}
@@ -275,128 +255,146 @@ export default function KnowledgeCenterPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto">
           {messages.length === 0 && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] sm:max-w-md lg:max-w-2xl xl:max-w-3xl rounded-xl px-4 py-3 shadow-sm bg-white border border-gray-200">
-                <div className="flex items-start space-x-3">
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                      <span className="text-white text-sm font-bold">Z</span>
-                    </div>
+            <div className="flex items-center justify-center h-full">
+              <div className="max-w-2xl mx-auto px-4 text-center">
+                <div className="mb-6">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+                    <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                    </svg>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-gray-900 mb-1">Zorxido</p>
-                    <p className="text-sm sm:text-base text-gray-900 leading-relaxed">
-                      Hello! I&apos;m <span className="font-semibold text-indigo-600">Zorxido</span>, your AI assistant for exploring your books. 
-                      I can answer questions based on the content you&apos;ve uploaded. Ask me anything about your books!
-                    </p>
-                    <p className="text-xs text-gray-500 mt-2">
-                      💡 Tip: You can ask me about specific topics, concepts, or request summaries from your uploaded books.
-                    </p>
-                  </div>
+                  <h2 className="text-2xl font-semibold text-gray-900 mb-2">How can I help you today?</h2>
+                  <p className="text-gray-600">I&apos;m Zorxido, your AI assistant. Ask me anything about your books.</p>
                 </div>
               </div>
             </div>
           )}
 
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+          <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+            {messages.map((message, index) => (
               <div
-                className={`max-w-[85%] sm:max-w-md lg:max-w-2xl xl:max-w-3xl rounded-xl px-4 py-3 shadow-sm ${
-                  message.role === 'user'
-                    ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white'
-                    : 'bg-white border border-gray-200 text-gray-900'
-                }`}
+                key={index}
+                className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <p className={`whitespace-pre-wrap text-sm sm:text-base leading-relaxed ${
-                  message.role === 'user' ? 'text-white' : 'text-gray-900'
-                }`}>{message.content}</p>
-                {message.sources && message.sources.length > 0 && (
-                  <div className={`mt-3 pt-3 border-t ${
-                    message.role === 'user' ? 'border-indigo-500 border-opacity-30' : 'border-gray-200'
-                  }`}>
-                    <p className={`text-xs font-semibold mb-2 ${
-                      message.role === 'user' ? 'text-indigo-100' : 'text-gray-700'
-                    }`}>Sources:</p>
-                    <ul className={`text-xs space-y-1.5 ${
-                      message.role === 'user' ? 'text-indigo-100' : 'text-gray-600'
+                {message.role === 'assistant' && (
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+                )}
+                
+                <div className={`flex-1 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                  <div className={`max-w-[85%] ${message.role === 'user' ? 'text-right' : ''}`}>
+                    <div className={`rounded-lg px-4 py-3 ${
+                      message.role === 'user'
+                        ? 'bg-blue-600 text-white ml-auto'
+                        : 'bg-gray-100 text-gray-900'
                     }`}>
-                      {message.sources.map((source, i) => (
-                        <li key={i} className="flex items-start">
-                          <span className="mr-2">•</span>
-                          <span>{source}</span>
-                        </li>
-                      ))}
-                    </ul>
+                      <p className={`whitespace-pre-wrap text-[15px] leading-7 ${
+                        message.role === 'user' ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        {message.content}
+                      </p>
+                    </div>
+                    {message.sources && message.sources.length > 0 && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        <p className="font-medium mb-1">Sources:</p>
+                        <ul className="space-y-0.5">
+                          {message.sources.map((source, i) => (
+                            <li key={i}>• {source}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {message.role === 'user' && (
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
+                    <span className="text-white text-sm font-medium">U</span>
                   </div>
                 )}
               </div>
-            </div>
-          ))}
+            ))}
 
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm">
-                <div className="flex space-x-2">
-                  <div className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce"></div>
-                  <div className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+            {loading && (
+              <div className="flex gap-4 justify-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="bg-gray-100 rounded-lg px-4 py-3 max-w-[85%]">
+                    <div className="flex space-x-1.5">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-4">
-              <div className="flex items-start">
-                <svg className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-sm font-medium text-red-800">{error}</p>
+            {error && (
+              <div className="flex justify-center">
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-md">
+                  <p className="text-sm text-red-800">{error}</p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Input */}
-        <div className="bg-white border-t border-gray-200 p-3 sm:p-4 shadow-lg">
-          <form onSubmit={handleSend} className="flex gap-2 sm:gap-3">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question about your books..."
-              disabled={loading || books.length === 0}
-              className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 sm:py-3 text-sm sm:text-base text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim() || books.length === 0}
-              className="rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-700 px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base font-medium text-white hover:from-indigo-700 hover:to-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all flex-shrink-0"
-            >
-              {loading ? (
-                <span className="flex items-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+        <div className="border-t border-gray-200 bg-white px-4 py-4">
+          <form onSubmit={handleSend} className="max-w-3xl mx-auto">
+            <div className="relative flex items-end gap-3 rounded-xl border border-gray-300 bg-white shadow-sm focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+              <textarea
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  const target = e.target as HTMLTextAreaElement
+                  target.style.height = 'auto'
+                  target.style.height = `${Math.min(target.scrollHeight, 200)}px`
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSend(e as any)
+                  }
+                }}
+                placeholder="Message Zorxido..."
+                disabled={loading || books.length === 0}
+                rows={1}
+                className="flex-1 resize-none border-0 px-4 py-3 text-[15px] text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ minHeight: '52px', maxHeight: '200px', overflowY: 'auto' }}
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim() || books.length === 0}
+                className="mb-2 mr-2 flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Sending...
-                </span>
-              ) : (
-                <span className="flex items-center">
-                  Send
-                  <svg className="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                   </svg>
-                </span>
-              )}
-            </button>
+                )}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-center text-gray-500">
+              Zorxido can make mistakes. Check important information.
+            </p>
           </form>
         </div>
       </div>

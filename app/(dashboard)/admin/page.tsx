@@ -327,79 +327,79 @@ export default function AdminPage() {
   const displayUsers = activeTab === 'pending' ? pendingUsers : users
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+    <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-6 sm:mb-8">
           <Link
             href="/dashboard"
-            className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700 mb-4"
+            className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 mb-4"
           >
             <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
             Back to Dashboard
           </Link>
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Admin Panel</h1>
-          <p className="mt-2 text-base sm:text-lg text-gray-600">Manage users and system settings</p>
+          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900">Admin Panel</h1>
+          <p className="mt-1 text-sm sm:text-base text-gray-600">Manage users and system settings</p>
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Total Users</p>
-                <p className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">{users.length}</p>
+                <p className="mt-2 text-2xl font-semibold text-gray-900">{users.length}</p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-indigo-100 flex items-center justify-center">
-                <svg className="h-6 w-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                <svg className="h-5 w-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Pending Approval</p>
-                <p className="mt-2 text-2xl sm:text-3xl font-bold text-yellow-600">{pendingUsers.length}</p>
+                <p className="mt-2 text-2xl font-semibold text-yellow-600">{pendingUsers.length}</p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-yellow-100 flex items-center justify-center">
-                <svg className="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="h-10 w-10 rounded-lg bg-yellow-50 flex items-center justify-center">
+                <svg className="h-5 w-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Approved Users</p>
-                <p className="mt-2 text-2xl sm:text-3xl font-bold text-green-600">
+                <p className="mt-2 text-2xl font-semibold text-green-600">
                   {users.filter(u => u.status === 'approved').length}
                 </p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-green-100 flex items-center justify-center">
-                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="h-10 w-10 rounded-lg bg-green-50 flex items-center justify-center">
+                <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Total Books</p>
-                <p className="mt-2 text-2xl sm:text-3xl font-bold text-purple-600">
+                <p className="mt-2 text-2xl font-semibold text-gray-900">
                   {users.reduce((sum, u) => sum + (u.current_books_count || 0), 0)}
                 </p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-purple-100 flex items-center justify-center">
-                <svg className="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                <svg className="h-5 w-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
               </div>
@@ -413,9 +413,9 @@ export default function AdminPage() {
             <nav className="-mb-px flex space-x-4 sm:space-x-8">
               <button
                 onClick={() => setActiveTab('pending')}
-                className={`py-3 px-1 sm:px-4 border-b-2 font-medium text-sm sm:text-base transition-colors ${
+                className={`py-3 px-1 sm:px-4 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'pending'
-                    ? 'border-indigo-500 text-indigo-600'
+                    ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -423,9 +423,9 @@ export default function AdminPage() {
               </button>
               <button
                 onClick={() => setActiveTab('all')}
-                className={`py-3 px-1 sm:px-4 border-b-2 font-medium text-sm sm:text-base transition-colors ${
+                className={`py-3 px-1 sm:px-4 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === 'all'
-                    ? 'border-indigo-500 text-indigo-600'
+                    ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -455,7 +455,7 @@ export default function AdminPage() {
             </p>
           </div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -482,8 +482,8 @@ export default function AdminPage() {
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-sm font-semibold text-indigo-600">
+                          <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                            <span className="text-sm font-semibold text-gray-700">
                               {(user.full_name || user.email)[0].toUpperCase()}
                             </span>
                           </div>
@@ -518,7 +518,7 @@ export default function AdminPage() {
                               </div>
                             </>
                           ) : (
-                            <span className="text-indigo-600 font-medium">No limits</span>
+                            <span className="text-blue-600 font-medium">No limits</span>
                           )}
                         </div>
                       </td>
@@ -544,7 +544,7 @@ export default function AdminPage() {
                             <>
                               <button
                                 onClick={() => openLimitsModal(user)}
-                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
                               >
                                 Limits
                               </button>
@@ -569,7 +569,7 @@ export default function AdminPage() {
         {/* Limits Modal */}
         {showLimitsModal && selectedUser && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">Set Usage Limits</h3>
                 <p className="mt-1 text-sm text-gray-600">{selectedUser.email}</p>
@@ -581,7 +581,7 @@ export default function AdminPage() {
                     id="has_limits"
                     checked={limitsForm.has_limits}
                     onChange={(e) => setLimitsForm({ ...limitsForm, has_limits: e.target.checked })}
-                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label htmlFor="has_limits" className="ml-2 text-sm font-medium text-gray-900">
                     Enable usage limits
@@ -599,7 +599,7 @@ export default function AdminPage() {
                         value={limitsForm.max_books}
                         onChange={(e) => setLimitsForm({ ...limitsForm, max_books: e.target.value })}
                         placeholder="Leave empty for unlimited"
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </div>
                     <div>
@@ -611,7 +611,7 @@ export default function AdminPage() {
                         value={limitsForm.max_pages_per_month}
                         onChange={(e) => setLimitsForm({ ...limitsForm, max_pages_per_month: e.target.value })}
                         placeholder="Leave empty for unlimited"
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </div>
                     <div>
@@ -623,7 +623,7 @@ export default function AdminPage() {
                         value={limitsForm.max_chat_messages_per_month}
                         onChange={(e) => setLimitsForm({ ...limitsForm, max_chat_messages_per_month: e.target.value })}
                         placeholder="Leave empty for unlimited"
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </div>
                   </div>
@@ -635,13 +635,13 @@ export default function AdminPage() {
                     setShowLimitsModal(false)
                     setSelectedUser(null)
                   }}
-                  className="flex-1 px-4 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                  className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleUpdateLimits}
-                  className="flex-1 px-4 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
+                  className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
                 >
                   Save Changes
                 </button>
