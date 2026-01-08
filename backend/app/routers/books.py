@@ -4,7 +4,7 @@ Book upload and management endpoints
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_supabase_client, get_supabase_admin_client
 from app.dependencies import get_current_user, check_usage_limits
