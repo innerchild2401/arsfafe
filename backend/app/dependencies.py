@@ -42,14 +42,14 @@ async def get_current_user(
         profile_response = admin_supabase.table("user_profiles").select("*").eq("id", user_id).execute()
         
         if not profile_response.data:
-                # Profile truly doesn't exist - create it (fallback if trigger didn't fire)
-                # SECURITY: This is safe because:
-                # 1. user_id comes from verified JWT token (cannot be spoofed)
-                # 2. We only create profile for the authenticated user (user_id from token)
-                # 3. All sensitive fields (role, status) are hardcoded to safe defaults
-                # 4. No user input is used for sensitive operations
-                print(f"⚠️ User profile not found for {user_id}, creating one...")
-                try:
+            # Profile truly doesn't exist - create it (fallback if trigger didn't fire)
+            # SECURITY: This is safe because:
+            # 1. user_id comes from verified JWT token (cannot be spoofed)
+            # 2. We only create profile for the authenticated user (user_id from token)
+            # 3. All sensitive fields (role, status) are hardcoded to safe defaults
+            # 4. No user input is used for sensitive operations
+            print(f"⚠️ User profile not found for {user_id}, creating one...")
+            try:
                 # Get full_name from user metadata if available
                 full_name = None
                 if hasattr(user_response.user, 'user_metadata') and user_response.user.user_metadata:
@@ -64,46 +64,45 @@ async def get_current_user(
                 
                 # Create profile with safe defaults
                 # Only use data from verified JWT token, no user input
-                try:
-                    create_response = admin_supabase.table("user_profiles").insert({
-                        "id": user_id,  # From verified token
-                        "email": user_email,  # From verified token
-                        "full_name": full_name,  # From token metadata (safe)
-                        "role": "user",  # Hardcoded safe default
-                        "status": "pending"  # Hardcoded safe default
-                    }).execute()
-                    
-                    if create_response.data:
-                        profile = create_response.data[0]
-                        print(f"✅ Created user profile for {user_id}")
+                create_response = admin_supabase.table("user_profiles").insert({
+                    "id": user_id,  # From verified token
+                    "email": user_email,  # From verified token
+                    "full_name": full_name,  # From token metadata (safe)
+                    "role": "user",  # Hardcoded safe default
+                    "status": "pending"  # Hardcoded safe default
+                }).execute()
+                
+                if create_response.data:
+                    profile = create_response.data[0]
+                    print(f"✅ Created user profile for {user_id}")
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create user profile"
+                    )
+            except Exception as e:
+                error_str = str(e)
+                # Handle duplicate key error (profile was created between check and insert)
+                if "duplicate key" in error_str.lower() or "23505" in error_str:
+                    print(f"⚠️ Profile was created concurrently, fetching it...")
+                    # Try to fetch it again with admin client
+                    retry_response = admin_supabase.table("user_profiles").select("*").eq("id", user_id).execute()
+                    if retry_response.data:
+                        profile = retry_response.data[0]
+                        print(f"✅ Retrieved user profile after concurrent creation")
                     else:
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Failed to create user profile"
+                            detail="Profile creation failed and could not be retrieved"
                         )
-                except Exception as e:
-                    error_str = str(e)
-                    # Handle duplicate key error (profile was created between check and insert)
-                    if "duplicate key" in error_str.lower() or "23505" in error_str:
-                        print(f"⚠️ Profile was created concurrently, fetching it...")
-                        # Try to fetch it again with admin client
-                        retry_response = admin_supabase.table("user_profiles").select("*").eq("id", user_id).execute()
-                        if retry_response.data:
-                            profile = retry_response.data[0]
-                            print(f"✅ Retrieved user profile after concurrent creation")
-                        else:
-                            raise HTTPException(
-                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Profile creation failed and could not be retrieved"
-                            )
-                    else:
-                        print(f"❌ Failed to create user profile: {error_str}")
-                        import traceback
-                        traceback.print_exc()
-                        raise HTTPException(
-                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"User profile not found and could not be created: {error_str}"
-                        )
+                else:
+                    print(f"❌ Failed to create user profile: {error_str}")
+                    import traceback
+                    traceback.print_exc()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"User profile not found and could not be created: {error_str}"
+                    )
         else:
             profile = profile_response.data[0]
         
