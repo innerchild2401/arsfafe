@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getBackendUrl } from '@/lib/api'
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -71,8 +72,8 @@ export default function UploadPage() {
       if (title) formData.append('title', title)
       if (author) formData.append('author', author)
 
-      // Get backend URL from environment or use default
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      // Get backend URL
+      const backendUrl = getBackendUrl()
 
       // Upload file
       const response = await fetch(`${backendUrl}/api/books/upload`, {
@@ -108,43 +109,57 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Header */}
         <div className="mb-8">
           <Link
             href="/dashboard"
-            className="text-indigo-600 hover:text-indigo-700 mb-4 inline-block"
+            className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-700 font-medium mb-6 transition-colors"
           >
-            ← Back to Dashboard
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Dashboard
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900">Upload Book</h1>
-          <p className="mt-2 text-gray-600">
-            Upload a PDF or EPUB file to add it to your knowledge center
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            Upload Book
+          </h1>
+          <p className="text-lg text-gray-600">
+            Add a PDF or EPUB file to your knowledge center
           </p>
         </div>
 
-        <div className="rounded-lg bg-white p-8 shadow">
+        {/* Upload Form */}
+        <div className="rounded-2xl bg-white p-8 shadow-xl border border-gray-100">
           <form onSubmit={handleUpload} className="space-y-6">
             {error && (
-              <div className="rounded-md bg-red-50 p-4">
-                <p className="text-sm text-red-800">{error}</p>
+              <div className="rounded-xl bg-red-50 border-2 border-red-200 p-4 flex items-start gap-3">
+                <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm font-medium text-red-800">{error}</p>
               </div>
             )}
 
             {success && (
-              <div className="rounded-md bg-green-50 p-4">
-                <p className="text-sm text-green-800">
-                  Book uploaded successfully! Processing in background. Redirecting...
-                </p>
+              <div className="rounded-xl bg-green-50 border-2 border-green-200 p-4 flex items-start gap-3">
+                <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-green-800 mb-1">Upload successful!</p>
+                  <p className="text-sm text-green-700">Processing in background. Redirecting to dashboard...</p>
+                </div>
               </div>
             )}
 
-            {/* File Upload */}
+            {/* File Upload Dropzone */}
             <div>
-              <label htmlFor="file" className="block text-sm font-medium text-gray-700">
-                Book File (PDF or EPUB)
+              <label htmlFor="file" className="block text-sm font-semibold text-gray-700 mb-3">
+                Book File
               </label>
-              <div className="mt-2">
+              <div className="relative">
                 <input
                   id="file"
                   name="file"
@@ -152,20 +167,42 @@ export default function UploadPage() {
                   accept=".pdf,.epub,application/pdf,application/epub+zip"
                   onChange={handleFileChange}
                   disabled={uploading}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  className="hidden"
                 />
+                <label
+                  htmlFor="file"
+                  className={`flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${
+                    file
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-gray-300 bg-gray-50 hover:border-indigo-400 hover:bg-indigo-50'
+                  } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {file ? (
+                    <>
+                      <svg className="w-12 h-12 text-indigo-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-sm font-semibold text-indigo-900 mb-1">{file.name}</p>
+                      <p className="text-xs text-indigo-600">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-xs text-gray-500 mt-2">Click to change file</p>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="text-sm font-semibold text-gray-700 mb-1">Click to upload or drag and drop</p>
+                      <p className="text-xs text-gray-500">PDF or EPUB (MAX. 100MB)</p>
+                    </>
+                  )}
+                </label>
               </div>
-              {file && (
-                <p className="mt-2 text-sm text-gray-500">
-                  Selected: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-                </p>
-              )}
             </div>
 
             {/* Title */}
             <div>
-              <label htmlFor="title" className="block text-sm font-medium text-gray-700">
-                Title (optional)
+              <label htmlFor="title" className="block text-sm font-semibold text-gray-700 mb-2">
+                Title <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <input
                 id="title"
@@ -174,15 +211,15 @@ export default function UploadPage() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={uploading}
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder="Book title (auto-filled from filename)"
               />
             </div>
 
             {/* Author */}
             <div>
-              <label htmlFor="author" className="block text-sm font-medium text-gray-700">
-                Author (optional)
+              <label htmlFor="author" className="block text-sm font-semibold text-gray-700 mb-2">
+                Author <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <input
                 id="author"
@@ -191,21 +228,21 @@ export default function UploadPage() {
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
                 disabled={uploading}
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder="Author name"
               />
             </div>
 
             {/* Upload Progress */}
             {uploading && (
-              <div>
-                <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm font-medium text-gray-700">
                   <span>Uploading...</span>
                   <span>{uploadProgress}%</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                   <div
-                    className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-indigo-600 to-purple-600 h-3 rounded-full transition-all duration-300 shadow-lg"
                     style={{ width: `${uploadProgress}%` }}
                   ></div>
                 </div>
@@ -217,18 +254,47 @@ export default function UploadPage() {
               <button
                 type="submit"
                 disabled={uploading || !file || success}
-                className="w-full rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white font-bold shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
               >
-                {uploading ? 'Uploading...' : success ? 'Uploaded!' : 'Upload Book'}
+                {uploading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Uploading...
+                  </>
+                ) : success ? (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Uploaded!
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    Upload Book
+                  </>
+                )}
               </button>
             </div>
 
             {/* Info */}
-            <div className="rounded-md bg-blue-50 p-4">
-              <p className="text-sm text-blue-800">
-                <strong>Note:</strong> Large books may take a few minutes to process. 
-                You&apos;ll be notified when your book is ready to use in the knowledge center.
-              </p>
+            <div className="rounded-xl bg-blue-50 border-2 border-blue-200 p-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-blue-900 mb-1">Processing Information</p>
+                  <p className="text-sm text-blue-800">
+                    Large books may take a few minutes to process. You&apos;ll be notified when your book is ready to use in the knowledge center.
+                  </p>
+                </div>
+              </div>
             </div>
           </form>
         </div>

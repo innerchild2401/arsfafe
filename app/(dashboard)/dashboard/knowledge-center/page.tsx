@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { getBackendUrl } from '@/lib/api'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -78,7 +79,7 @@ export default function KnowledgeCenterPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
       const { data: { session } } = await supabase.auth.getSession()
       
       if (!session) return
@@ -113,7 +114,7 @@ export default function KnowledgeCenterPage() {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const backendUrl = getBackendUrl()
         const { data: { session } } = await supabase.auth.getSession()
         
         if (!session) return
@@ -170,7 +171,7 @@ export default function KnowledgeCenterPage() {
         throw new Error('Not authenticated')
       }
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
 
       const response = await fetch(`${backendUrl}/api/chat`, {
         method: 'POST',

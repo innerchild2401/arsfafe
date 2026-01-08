@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getBackendUrl } from '@/lib/api'
 
 interface User {
   id: string
@@ -72,7 +73,7 @@ export default function AdminPage() {
           throw new Error('Not authenticated')
         }
 
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const backendUrl = getBackendUrl()
 
         // Load all users
         const allResponse = await fetch(`${backendUrl}/api/admin/users`, {
@@ -114,7 +115,7 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
 
       const response = await fetch(`${backendUrl}/api/admin/users/${userId}/approve`, {
         method: 'POST',
@@ -166,7 +167,7 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
 
       const response = await fetch(`${backendUrl}/api/admin/users/${userId}/reject`, {
         method: 'POST',
@@ -208,7 +209,7 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
 
       const response = await fetch(`${backendUrl}/api/admin/users/${userId}/suspend`, {
         method: 'POST',
@@ -261,7 +262,7 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = getBackendUrl()
 
       const response = await fetch(`${backendUrl}/api/admin/users/${selectedUser.id}/limits`, {
         method: 'PUT',
