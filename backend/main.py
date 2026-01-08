@@ -33,11 +33,12 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-# Import routers (will be created)
-# from app.routers import auth, books, chat, admin
+# Import routers
+from app.routers import books
+# from app.routers import auth, chat, admin
 
 # app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-# app.include_router(books.router, prefix="/api/books", tags=["books"])
+app.include_router(books.router, prefix="/api/books", tags=["books"])
 # app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 # app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
