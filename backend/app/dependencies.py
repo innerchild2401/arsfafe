@@ -36,20 +36,12 @@ async def get_current_user(
         user_id = user_response.user.id
         user_email = user_response.user.email or ""
         
-        # Get user profile - try with regular client first
-        profile_response = supabase.table("user_profiles").select("*").eq("id", user_id).execute()
+        # Always use admin client to fetch profile (bypasses RLS)
+        # This ensures admins can always access their profile
+        admin_supabase = get_supabase_admin_client()
+        profile_response = admin_supabase.table("user_profiles").select("*").eq("id", user_id).execute()
         
         if not profile_response.data:
-            # Profile might exist but RLS is blocking access, or it truly doesn't exist
-            # Use admin client to check (bypasses RLS)
-            admin_supabase = get_supabase_admin_client()
-            admin_profile_response = admin_supabase.table("user_profiles").select("*").eq("id", user_id).execute()
-            
-            if admin_profile_response.data:
-                # Profile exists but RLS blocked access - use admin client to fetch it
-                profile = admin_profile_response.data[0]
-                print(f"✅ Found user profile via admin client for {user_id} (RLS was blocking)")
-            else:
                 # Profile truly doesn't exist - create it (fallback if trigger didn't fire)
                 # SECURITY: This is safe because:
                 # 1. user_id comes from verified JWT token (cannot be spoofed)
@@ -58,20 +50,21 @@ async def get_current_user(
                 # 4. No user input is used for sensitive operations
                 print(f"⚠️ User profile not found for {user_id}, creating one...")
                 try:
-                    # Get full_name from user metadata if available
-                    full_name = None
-                    if hasattr(user_response.user, 'user_metadata') and user_response.user.user_metadata:
-                        full_name = user_response.user.user_metadata.get('full_name')
-                    
-                    # SECURITY: Validate user_id matches authenticated user (double-check)
-                    if not user_id or user_id != user_response.user.id:
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid user ID"
-                        )
-                    
-                    # Create profile with safe defaults
-                    # Only use data from verified JWT token, no user input
+                # Get full_name from user metadata if available
+                full_name = None
+                if hasattr(user_response.user, 'user_metadata') and user_response.user.user_metadata:
+                    full_name = user_response.user.user_metadata.get('full_name')
+                
+                # SECURITY: Validate user_id matches authenticated user (double-check)
+                if not user_id or user_id != user_response.user.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid user ID"
+                    )
+                
+                # Create profile with safe defaults
+                # Only use data from verified JWT token, no user input
+                try:
                     create_response = admin_supabase.table("user_profiles").insert({
                         "id": user_id,  # From verified token
                         "email": user_email,  # From verified token
