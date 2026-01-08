@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime
 
-from app.database import get_supabase_client
+from app.database import get_supabase_client, get_supabase_admin_client
 from app.dependencies import get_current_user, check_usage_limits
 from app.utils.file_utils import (
     calculate_file_hash,
@@ -75,9 +75,11 @@ async def upload_book(
         # Calculate file hash for deduplication
         file_hash = calculate_file_hash(file_content)
         
-        # Check if book already exists
-        supabase = get_supabase_client()
+        # Use admin client for all database and storage operations to bypass RLS
+        # This ensures the backend can perform all operations regardless of RLS policies
+        supabase = get_supabase_admin_client()
         
+        # Check if book already exists
         existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
         
         if existing_book.data:
@@ -106,11 +108,12 @@ async def upload_book(
         # New book - upload to Supabase Storage first
         print("💾 Uploading file to storage...")
         try:
+            # Pass admin client to storage service (or let it use default admin client)
             storage_path = upload_file_to_storage(
                 file_content=file_content,
                 filename=file.filename,
                 folder="books",
-                supabase=supabase
+                supabase=supabase  # Use admin client
             )
             print(f"✅ File uploaded to storage: {storage_path}")
         except Exception as e:
