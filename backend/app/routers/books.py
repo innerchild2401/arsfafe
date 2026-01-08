@@ -130,7 +130,6 @@ async def upload_book(
                 })
             
             # If book had an error, allow retry by continuing with processing
-            # We'll check after text extraction if we should retry or just grant access
             if book_status == "error":
                 # Check if this user is the original owner
                 original_owner = supabase.table("user_book_access").select("user_id, is_owner").eq("book_id", book_id).eq("is_owner", True).execute()
@@ -146,8 +145,9 @@ async def upload_book(
                         "message": message + " Book previously failed processing. Original owner can retry by uploading again."
                     })
                 
-                # Owner is retrying - continue with processing below
+                # Owner is retrying - set retry_mode and continue with processing
                 print(f"🔄 Book {book_id} previously failed processing. Owner is retrying - continuing with processing...")
+                retry_mode = True  # Set retry mode flag
                 
                 # Delete existing chunks if any (clean slate for retry)
                 try:
@@ -163,17 +163,21 @@ async def upload_book(
                     "processing_error": None
                 }).eq("id", book_id).execute()
                 
-                # Continue with text extraction and processing below (don't return here)
-            
-            # Default case (status: uploaded) - should not happen if processing completed
-            return JSONResponse({
-                "book_id": book_id,
-                "status": "existing",
-                "book_status": book_status,
-                "message": message
-            })
+                # Store book reference for retry mode (we'll use file_path later)
+                # Continue to text extraction and processing below - DON'T return here
+                pass
+            elif book_status == "uploaded":
+                # Default case (status: uploaded) - should not happen if processing completed
+                # But if it does, just return
+                return JSONResponse({
+                    "book_id": book_id,
+                    "status": "existing",
+                    "book_status": book_status,
+                    "message": message
+                })
         
         # Upload to Supabase Storage (skip if retry mode)
+        print(f"🔄 retry_mode = {retry_mode}")
         if not retry_mode:
             print("💾 Uploading file to storage...")
             try:
