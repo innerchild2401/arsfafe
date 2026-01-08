@@ -4,10 +4,10 @@ Book upload and management endpoints
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Optional
-import asyncio
 from datetime import datetime
 
 from app.database import get_supabase_client
+from app.dependencies import get_current_user, check_usage_limits
 from app.utils.file_utils import (
     calculate_file_hash,
     calculate_text_hash,
@@ -20,19 +20,17 @@ from app.services.epub_extractor import extract_text_from_epub
 from app.services.structure_extractor import extract_structure
 from app.services.embedding_service import generate_embeddings_batch
 from app.services.topic_labeler import generate_topic_labels
+from app.services.storage_service import upload_file_to_storage
 
 router = APIRouter()
-
-# TODO: Add authentication dependency
-# from app.dependencies import get_current_user
 
 @router.post("/upload")
 async def upload_book(
     file: UploadFile = File(...),
     title: Optional[str] = None,
     author: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
-    # current_user = Depends(get_current_user)
+    background_tasks: BackgroundTasks = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Upload a book (PDF or EPUB)
@@ -43,6 +41,9 @@ async def upload_book(
     - Automatic text extraction
     - Background processing
     """
+    # Check usage limits
+    check_usage_limits(current_user, "books")
+    
     # Validate file type
     if not is_valid_file_type(file.filename):
         raise HTTPException(
@@ -66,10 +67,19 @@ async def upload_book(
     if existing_book.data:
         # Book exists - grant access to user
         book_id = existing_book.data[0]["id"]
+        user_id = current_user["id"]
         
         # Check if user already has access
-        # user_id = current_user.id
-        # TODO: Implement user access check and grant
+        access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).execute()
+        
+        if not access_check.data:
+            # Grant access to existing book
+            supabase.table("user_book_access").insert({
+                "user_id": user_id,
+                "book_id": book_id,
+                "is_owner": False,
+                "is_visible": True
+            }).execute()
         
         return JSONResponse({
             "book_id": book_id,
@@ -77,9 +87,13 @@ async def upload_book(
             "message": "Book already exists. Access granted."
         })
     
-    # New book - start processing
-    # TODO: Upload to Supabase Storage first
-    # For now, we'll process in memory
+    # New book - upload to Supabase Storage first
+    storage_path = upload_file_to_storage(
+        file_content=file_content,
+        filename=file.filename,
+        folder="books",
+        supabase=supabase
+    )
     
     # Extract text based on file type
     if file_type == "pdf":
@@ -113,7 +127,7 @@ async def upload_book(
         "file_type": file_type,
         "file_size": file_size,
         "file_hash": file_hash,
-        "file_path": f"books/{file_hash}",  # TODO: Upload to Supabase Storage
+        "file_path": storage_path,
         "title": title or pdf_metadata.get("title"),
         "author": author or pdf_metadata.get("author"),
         "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
@@ -124,10 +138,15 @@ async def upload_book(
     
     book_result = supabase.table("books").insert(book_data).execute()
     book_id = book_result.data[0]["id"]
+    user_id = current_user["id"]
     
-    # Grant access to user
-    # user_id = current_user.id
-    # TODO: Create user_book_access record
+    # Grant access to user (as owner)
+    supabase.table("user_book_access").insert({
+        "user_id": user_id,
+        "book_id": book_id,
+        "is_owner": True,
+        "is_visible": True
+    }).execute()
     
     # Process book in background
     if background_tasks:
@@ -247,16 +266,33 @@ async def process_book(
 
 @router.get("/")
 async def list_books(
-    # current_user = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    include_deleted: bool = False
 ):
     """List user's books"""
-    # TODO: Implement user-specific book listing
     supabase = get_supabase_client()
+    user_id = current_user["id"]
     
-    # For now, return all books (will be filtered by RLS)
-    result = supabase.table("books").select("*").order("created_at", desc=True).execute()
+    # Get user's accessible books
+    query = supabase.table("user_book_access").select(
+        "book_id, is_owner, is_visible, books(*)"
+    ).eq("user_id", user_id)
     
-    return {"books": result.data}
+    if not include_deleted:
+        query = query.eq("is_visible", True)
+    
+    result = query.order("access_granted_at", desc=True).execute()
+    
+    # Format response
+    books = []
+    for access in result.data:
+        book = access.get("books")
+        if book:
+            book["is_owner"] = access.get("is_owner", False)
+            book["is_visible"] = access.get("is_visible", True)
+            books.append(book)
+    
+    return {"books": books}
 
 @router.get("/{book_id}")
 async def get_book(book_id: str):
@@ -271,8 +307,40 @@ async def get_book(book_id: str):
     return {"book": result.data[0]}
 
 @router.delete("/{book_id}")
-async def delete_book(book_id: str):
+async def delete_book(
+    book_id: str,
+    current_user: dict = Depends(get_current_user)
+):
     """Soft delete book (user-specific)"""
-    # TODO: Implement soft delete via user_book_access
-    # For now, just return success
+    supabase = get_supabase_client()
+    user_id = current_user["id"]
+    
+    # Soft delete by setting is_visible = false
+    result = supabase.table("user_book_access").update({
+        "is_visible": False,
+        "deleted_at": datetime.utcnow().isoformat()
+    }).eq("user_id", user_id).eq("book_id", book_id).execute()
+    
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Book not found or access denied")
+    
     return {"message": "Book deleted (soft delete - book remains in database)"}
+
+@router.post("/{book_id}/restore")
+async def restore_book(
+    book_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Restore a soft-deleted book"""
+    supabase = get_supabase_client()
+    user_id = current_user["id"]
+    
+    result = supabase.table("user_book_access").update({
+        "is_visible": True,
+        "deleted_at": None
+    }).eq("user_id", user_id).eq("book_id", book_id).execute()
+    
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Book not found or access denied")
+    
+    return {"message": "Book restored"}
