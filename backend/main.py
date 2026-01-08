@@ -1,10 +1,13 @@
 """
 FastAPI Backend for RAG System
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import os
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,38 +19,77 @@ app = FastAPI(
 )
 
 # CORS Configuration
-# CORS Configuration - load settings after basic setup to allow health check
-try:
-    from app.config import settings
-    cors_origins_str = os.getenv("CORS_ORIGINS", settings.cors_origins)
-except Exception:
-    # Fallback if config fails (e.g., missing env vars)
-    cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+# Load CORS origins from environment or use defaults
+cors_origins_str = os.getenv("CORS_ORIGINS", "")
 
-# Parse CORS origins from comma-separated string and strip whitespace
-cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+# Default origins that should always be allowed
+default_origins = [
+    "http://localhost:3000",
+    "https://arsfafer.vercel.app",
+]
 
-# Ensure localhost is included for development
-if "http://localhost:3000" not in cors_origins:
-    cors_origins.append("http://localhost:3000")
+# Parse CORS origins from comma-separated string
+cors_origins = []
+if cors_origins_str:
+    cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
 
-# Ensure Vercel domain is included
-if "https://arsfafer.vercel.app" not in cors_origins:
-    cors_origins.append("https://arsfafer.vercel.app")
+# Always add default origins
+cors_origins.extend(default_origins)
 
 # Remove duplicates while preserving order
 cors_origins = list(dict.fromkeys(cors_origins))
 
-print(f"CORS allowed origins: {cors_origins}")  # Debug log
+print(f"🔒 CORS allowed origins: {cors_origins}")  # Debug log
 
+# Add CORS middleware - must be added before routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Global exception handlers to ensure CORS headers are always sent
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with CORS headers"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with CORS headers"""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions with CORS headers"""
+    print(f"❌ Unhandled exception: {exc}")
+    print(traceback.format_exc())
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error", "error": str(exc)},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 @app.get("/")
 async def root():
