@@ -96,45 +96,46 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8">
+      <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
+        <div className="mb-6 sm:mb-8">
           <Link
             href="/dashboard"
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-flex items-center gap-1"
+            className="inline-flex items-center gap-1.5 text-sm sm:text-base font-medium text-blue-600 hover:text-blue-700 mb-4 sm:mb-6 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
             Back to Dashboard
           </Link>
-          <h1 className="text-2xl font-semibold text-gray-900">Upload Book</h1>
-          <p className="mt-1 text-base text-gray-600">Add a PDF or EPUB file to your knowledge center</p>
+          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Upload Book</h1>
+          <p className="text-sm sm:text-base text-gray-600">Add a PDF or EPUB file to your knowledge center</p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 lg:p-8">
           <form onSubmit={handleUpload} className="space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4">
                 <p className="text-sm text-red-800">{error}</p>
               </div>
             )}
 
             {success && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
                 <p className="text-sm text-green-800">Book uploaded successfully! Processing in background...</p>
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Book File
+              <label htmlFor="file" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
+                Book File <span className="text-red-500">*</span>
               </label>
               <input
+                id="file"
                 type="file"
                 accept=".pdf,.epub,application/pdf,application/epub+zip"
                 onChange={handleFileChange}
                 disabled={uploading}
-                className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-white focus:outline-none focus:border-blue-500"
+                className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed file:mr-4 file:py-2 file:px-4 file:rounded-l-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
               />
               {file && (
                 <p className="mt-2 text-sm text-gray-600">
@@ -144,29 +145,31 @@ export default function UploadPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="title" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
                 Title <span className="text-gray-500 font-normal">(optional)</span>
               </label>
               <input
+                id="title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={uploading}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
                 placeholder="Book title"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="author" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
                 Author <span className="text-gray-500 font-normal">(optional)</span>
               </label>
               <input
+                id="author"
                 type="text"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
                 disabled={uploading}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
                 placeholder="Author name"
               />
             </div>
@@ -174,7 +177,7 @@ export default function UploadPage() {
             <button
               type="submit"
               disabled={uploading || !file || success}
-              className="w-full bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+              className="w-full bg-blue-600 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm sm:text-base transition-colors"
             >
               {uploading ? 'Uploading...' : success ? 'Uploaded!' : 'Upload Book'}
             </button>

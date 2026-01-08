@@ -19,17 +19,34 @@ app = FastAPI(
 # CORS Configuration - load settings after basic setup to allow health check
 try:
     from app.config import settings
-    cors_origins = os.getenv("CORS_ORIGINS", settings.cors_origins).split(",")
+    cors_origins_str = os.getenv("CORS_ORIGINS", settings.cors_origins)
 except Exception:
     # Fallback if config fails (e.g., missing env vars)
-    cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+
+# Parse CORS origins from comma-separated string and strip whitespace
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+
+# Ensure localhost is included for development
+if "http://localhost:3000" not in cors_origins:
+    cors_origins.append("http://localhost:3000")
+
+# Ensure Vercel domain is included
+if "https://arsfafer.vercel.app" not in cors_origins:
+    cors_origins.append("https://arsfafer.vercel.app")
+
+# Remove duplicates while preserving order
+cors_origins = list(dict.fromkeys(cors_origins))
+
+print(f"CORS allowed origins: {cors_origins}")  # Debug log
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.get("/")

@@ -455,115 +455,188 @@ export default function AdminPage() {
             </p>
           </div>
         ) : (
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      User
-                    </th>
-                    <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">
-                      Status
-                    </th>
-                    <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">
-                      Usage
-                    </th>
-                    <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">
-                      Limits
-                    </th>
-                    <th className="px-4 sm:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {displayUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-sm font-semibold text-gray-700">
-                              {(user.full_name || user.email)[0].toUpperCase()}
-                            </span>
-                          </div>
-                          <div className="ml-3 sm:ml-4">
-                            <div className="text-sm font-semibold text-gray-900">
-                              {user.full_name || 'No name'}
-                            </div>
-                            <div className="text-sm text-gray-500">{user.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap hidden sm:table-cell">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(user.status)}`}>
-                          {user.status}
+          <>
+            {/* Mobile Card View */}
+            <div className="lg:hidden space-y-4">
+              {displayUsers.map((user) => (
+                <div key={user.id} className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                        <span className="text-sm font-semibold text-gray-700">
+                          {(user.full_name || user.email)[0].toUpperCase()}
                         </span>
-                      </td>
-                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap hidden lg:table-cell">
-                        <div className="text-sm text-gray-900">
-                          <div>Books: <span className="font-semibold">{user.current_books_count || 0}</span></div>
-                          <div className="text-xs text-gray-500">
-                            Pages: {user.pages_processed_this_month || 0} | Messages: {user.chat_messages_this_month || 0}
-                          </div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {user.full_name || 'No name'}
                         </div>
-                      </td>
-                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap hidden lg:table-cell">
-                        <div className="text-sm text-gray-900">
-                          {user.has_limits ? (
-                            <>
-                              <div>Books: {user.max_books || '∞'}</div>
-                              <div className="text-xs text-gray-500">
-                                Pages: {user.max_pages_per_month || '∞'} | Messages: {user.max_chat_messages_per_month || '∞'}
-                              </div>
-                            </>
-                          ) : (
-                            <span className="text-blue-600 font-medium">No limits</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex flex-col sm:flex-row gap-2 justify-end">
-                          {user.status === 'pending' && (
-                            <>
-                              <button
-                                onClick={() => handleApprove(user.id)}
-                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => handleReject(user.id)}
-                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
-                              >
-                                Reject
-                              </button>
-                            </>
-                          )}
-                          {user.status === 'approved' && (
-                            <>
-                              <button
-                                onClick={() => openLimitsModal(user)}
-                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
-                              >
-                                Limits
-                              </button>
-                              <button
-                                onClick={() => handleSuspend(user.id)}
-                                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-                              >
-                                Suspend
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <div className="text-xs text-gray-500">{user.email}</div>
+                      </div>
+                    </div>
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(user.status)}`}>
+                      {user.status}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-gray-600">Books</p>
+                      <p className="font-semibold text-gray-900">{user.current_books_count || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Pages</p>
+                      <p className="font-semibold text-gray-900">{user.pages_processed_this_month || 0}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+                    {user.status === 'pending' && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(user.id)}
+                          className="flex-1 min-w-[100px] px-3 py-2 rounded-md text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(user.id)}
+                          className="flex-1 min-w-[100px] px-3 py-2 rounded-md text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {user.status === 'approved' && (
+                      <>
+                        <button
+                          onClick={() => openLimitsModal(user)}
+                          className="flex-1 min-w-[100px] px-3 py-2 rounded-md text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                        >
+                          Limits
+                        </button>
+                        <button
+                          onClick={() => handleSuspend(user.id)}
+                          className="flex-1 min-w-[100px] px-3 py-2 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          Suspend
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden lg:block bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        User
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Usage
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Limits
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {displayUsers.map((user) => (
+                      <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-sm font-semibold text-gray-700">
+                                {(user.full_name || user.email)[0].toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-semibold text-gray-900">
+                                {user.full_name || 'No name'}
+                              </div>
+                              <div className="text-sm text-gray-500">{user.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(user.status)}`}>
+                            {user.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            <div>Books: <span className="font-semibold">{user.current_books_count || 0}</span></div>
+                            <div className="text-xs text-gray-500">
+                              Pages: {user.pages_processed_this_month || 0} | Messages: {user.chat_messages_this_month || 0}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {user.has_limits ? (
+                              <>
+                                <div>Books: {user.max_books || '∞'}</div>
+                                <div className="text-xs text-gray-500">
+                                  Pages: {user.max_pages_per_month || '∞'} | Messages: {user.max_chat_messages_per_month || '∞'}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-blue-600 font-medium">No limits</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="flex gap-2 justify-end">
+                            {user.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => handleApprove(user.id)}
+                                  className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => handleReject(user.id)}
+                                  className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {user.status === 'approved' && (
+                              <>
+                                <button
+                                  onClick={() => openLimitsModal(user)}
+                                  className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                >
+                                  Limits
+                                </button>
+                                <button
+                                  onClick={() => handleSuspend(user.id)}
+                                  className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                                >
+                                  Suspend
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Limits Modal */}

@@ -9,8 +9,10 @@ SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 OPENAI_API_KEY=your_openai_api_key
-CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
+CORS_ORIGINS=https://arsfafer.vercel.app,http://localhost:3000
 ```
+
+**Important**: Make sure to set `CORS_ORIGINS` with your actual Vercel domain. The backend will automatically include `https://arsfafer.vercel.app` and `http://localhost:3000` even if not specified, but it's best to set it explicitly.
 
 ## Note
 
