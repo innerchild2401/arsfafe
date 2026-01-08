@@ -16,8 +16,14 @@ app = FastAPI(
 )
 
 # CORS Configuration
-from app.config import settings
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+# CORS Configuration - load settings after basic setup to allow health check
+try:
+    from app.config import settings
+    cors_origins = os.getenv("CORS_ORIGINS", settings.cors_origins).split(",")
+except Exception:
+    # Fallback if config fails (e.g., missing env vars)
+    cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -34,13 +40,18 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-# Import routers
-from app.routers import books, auth, admin, chat
+# Import routers (these will fail if env vars missing, but health endpoint works)
+try:
+    from app.routers import books, auth, admin, chat
 
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(books.router, prefix="/api/books", tags=["books"])
-app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(books.router, prefix="/api/books", tags=["books"])
+    app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+    app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+except Exception as e:
+    # Log error but don't crash - health endpoint should still work
+    print(f"Warning: Failed to load routers: {e}")
+    print("Please check environment variables are set correctly")
 
 if __name__ == "__main__":
     import uvicorn

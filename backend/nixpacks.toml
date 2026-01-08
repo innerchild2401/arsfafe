@@ -6,15 +6,15 @@ cmds = [
   "python -m venv /opt/venv",
   "source /opt/venv/bin/activate",
   "pip install --upgrade pip",
-  "pip install -r requirements.txt"
+  "pip install -r requirements.txt",
+  "chmod +x start.sh || true"
 ]
 
 [phases.build]
 cmds = []
 
 [start]
-cmd = "source /opt/venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port $PORT"
+cmd = "bash start.sh"
 
 [variables]
 PYTHONUNBUFFERED = "1"
-PATH = "/opt/venv/bin:$PATH"

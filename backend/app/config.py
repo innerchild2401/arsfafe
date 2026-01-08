@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str
     
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+        extra = "ignore"
+    
     # DeepSeek OCR (optional, commented out for now)
     # deepseek_ocr_api_key: str = ""
     
@@ -34,8 +39,4 @@ class Settings(BaseSettings):
     chat_model: str = "gpt-4o-mini"
     labeling_model: str = "gpt-4o-mini"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
 settings = Settings()
