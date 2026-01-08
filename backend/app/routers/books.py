@@ -293,14 +293,19 @@ async def upload_book(
         
         # Process book in background
         if background_tasks:
+            print(f"🔄 Adding background processing task for book {book_id}")
+            print(f"📊 Extracted text length for processing: {len(extracted_text)} characters")
             background_tasks.add_task(
                 process_book,
                 book_id=book_id,
-                extracted_text=extracted_text,
+                extracted_text=extracted_text,  # Full extracted text for processing
                 file_type=file_type,
-                title=book_data["title"],
-                author=book_data["author"]
+                title=book_data.get("title"),
+                author=book_data.get("author")
             )
+            print(f"✅ Background task added successfully")
+        else:
+            print(f"⚠️ WARNING: background_tasks is None - processing will not happen!")
         
         return JSONResponse({
             "book_id": book_id,
@@ -321,7 +326,7 @@ async def upload_book(
             detail=f"Upload failed: {str(e)}"
         )
 
-async def process_book(
+def process_book(
     book_id: str,
     extracted_text: str,
     file_type: str,
@@ -336,6 +341,9 @@ async def process_book(
     4. Store in database
     """
     try:
+        print(f"🔄 Starting background processing for book {book_id}")
+        print(f"📊 Extracted text length: {len(extracted_text)} characters")
+        
         # Use admin client for background processing to bypass RLS
         supabase = get_supabase_admin_client()
         
@@ -343,15 +351,23 @@ async def process_book(
         supabase.table("books").update({
             "status": "processing"
         }).eq("id", book_id).execute()
+        print(f"✅ Updated book status to 'processing'")
         
         # Step 1: Extract structure
+        print(f"🔍 Step 1: Extracting structure using GPT-4o-mini...")
         structured_json = extract_structure(extracted_text, title, author)
+        print(f"✅ Structure extracted successfully")
         
         # Step 2: Create chunks and generate embeddings
+        print(f"📦 Step 2: Creating chunks...")
         parent_chunks = []
         child_chunks = []
         
-        for chapter in structured_json["document"]["chapters"]:
+        num_chapters = len(structured_json["document"]["chapters"])
+        print(f"📚 Found {num_chapters} chapters")
+        
+        for chapter_idx, chapter in enumerate(structured_json["document"]["chapters"]):
+            print(f"📖 Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter.get('chapter_title', 'Untitled')}")
             chapter_title = chapter.get("chapter_title", "Untitled Chapter")
             
             for section in chapter.get("sections", []):
@@ -362,7 +378,9 @@ async def process_book(
                 parent_text = "\n\n".join(paragraphs)
                 
                 # Generate topic labels
+                print(f"🏷️  Generating topic labels for section: {section_title[:50]}...")
                 topic_labels = generate_topic_labels(parent_text)
+                print(f"✅ Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 
                 # Insert parent chunk
                 parent_data = {
@@ -382,9 +400,12 @@ async def process_book(
                 
                 if child_texts:
                     # Generate embeddings in batch
+                    print(f"🧮 Generating embeddings for {len(child_texts)} child chunks...")
                     embeddings = generate_embeddings_batch(child_texts)
+                    print(f"✅ Generated {len(embeddings)} embeddings")
                     
                     # Insert child chunks
+                    print(f"💾 Inserting {len(child_texts)} child chunks into database...")
                     for idx, (text, embedding) in enumerate(zip(child_texts, embeddings)):
                         child_data = {
                             "parent_id": parent_id,
@@ -411,14 +432,21 @@ async def process_book(
     except Exception as e:
         # Update book status to error
         # Use admin client to bypass RLS
+        import traceback
+        error_message = str(e)
+        error_traceback = traceback.format_exc()
+        
+        print(f"❌ ERROR processing book {book_id}: {error_message}")
+        print(f"❌ Traceback:\n{error_traceback}")
+        
         error_supabase = get_supabase_admin_client()
         error_supabase.table("books").update({
             "status": "error",
-            "processing_error": str(e)
+            "processing_error": f"{error_message}\n\nTraceback:\n{error_traceback[:5000]}"  # Limit error message size
         }).eq("id", book_id).execute()
         
-        print(f"Error processing book {book_id}: {str(e)}")
-        raise
+        print(f"❌ Updated book status to 'error' with error message")
+        # Don't re-raise - background tasks shouldn't crash the server
 
 @router.get("/")
 async def list_books(
