@@ -88,6 +88,7 @@ async def upload_book(
             book_id = book["id"]
             book_status = book.get("status", "uploaded")
             user_id = current_user["id"]
+            retry_mode = False  # Flag for retry mode - will be set to True if error status and owner retries
             
             # Check if user already has access
             access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).execute()
@@ -128,16 +129,41 @@ async def upload_book(
                     "message": message + " Book is still being processed."
                 })
             
-            # If book had an error, we could retry processing, but for now just grant access
-            # (User can manually retry if needed, or we could add a retry endpoint)
+            # If book had an error, allow retry by continuing with processing
+            # We'll check after text extraction if we should retry or just grant access
             if book_status == "error":
-                print(f"⚠️ Book {book_id} previously failed processing (status: error). Access granted.")
-                return JSONResponse({
-                    "book_id": book_id,
-                    "status": "existing",
-                    "book_status": "error",
-                    "message": message + " Book previously failed processing. You can try uploading again to retry."
-                })
+                # Check if this user is the original owner
+                original_owner = supabase.table("user_book_access").select("user_id, is_owner").eq("book_id", book_id).eq("is_owner", True).execute()
+                is_owner = original_owner.data and original_owner.data[0]["user_id"] == user_id
+                
+                # If not owner, just grant access and return
+                if not is_owner:
+                    print(f"⚠️ Book {book_id} previously failed processing (status: error). Access granted, but not retrying (not owner).")
+                    return JSONResponse({
+                        "book_id": book_id,
+                        "status": "existing",
+                        "book_status": "error",
+                        "message": message + " Book previously failed processing. Original owner can retry by uploading again."
+                    })
+                
+                # Owner is retrying - continue with processing below
+                print(f"🔄 Book {book_id} previously failed processing. Owner is retrying - continuing with processing...")
+                
+                # Delete existing chunks if any (clean slate for retry)
+                try:
+                    supabase.table("child_chunks").delete().eq("book_id", book_id).execute()
+                    supabase.table("parent_chunks").delete().eq("book_id", book_id).execute()
+                    print(f"🧹 Cleaned up existing chunks for retry")
+                except Exception as e:
+                    print(f"⚠️ Could not clean up chunks: {str(e)}")
+                
+                # Update status to processing
+                supabase.table("books").update({
+                    "status": "processing",
+                    "processing_error": None
+                }).eq("id", book_id).execute()
+                
+                # Continue with text extraction and processing below (don't return here)
             
             # Default case (status: uploaded) - should not happen if processing completed
             return JSONResponse({
@@ -147,23 +173,28 @@ async def upload_book(
                 "message": message
             })
         
-        # New book - upload to Supabase Storage first
-        print("💾 Uploading file to storage...")
-        try:
-            # Pass admin client to storage service (or let it use default admin client)
-            storage_path = upload_file_to_storage(
-                file_content=file_content,
-                filename=file.filename,
-                folder="books",
-                supabase=supabase  # Use admin client
-            )
-            print(f"✅ File uploaded to storage: {storage_path}")
-        except Exception as e:
-            print(f"❌ Storage upload failed: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to upload file to storage: {str(e)}"
-            )
+        # Upload to Supabase Storage (skip if retry mode)
+        if not retry_mode:
+            print("💾 Uploading file to storage...")
+            try:
+                # Pass admin client to storage service (or let it use default admin client)
+                storage_path = upload_file_to_storage(
+                    file_content=file_content,
+                    filename=file.filename,
+                    folder="books",
+                    supabase=supabase  # Use admin client
+                )
+                print(f"✅ File uploaded to storage: {storage_path}")
+            except Exception as e:
+                print(f"❌ Storage upload failed: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload file to storage: {str(e)}"
+                )
+        else:
+            # Retry mode: reuse existing storage path
+            storage_path = book.get("file_path")
+            print(f"🔄 Retry mode: reusing existing storage path: {storage_path}")
         
         # Extract text based on file type
         print(f"📖 Extracting text from {file_type} file...")
@@ -214,32 +245,51 @@ async def upload_book(
         # Calculate text hash for content-based deduplication
         text_hash = calculate_text_hash(extracted_text)
         
-        # Create book record
-        book_data = {
-            "original_filename": file.filename,
-            "file_type": file_type,
-            "file_size": file_size,
-            "file_hash": file_hash,
-            "file_path": storage_path,
-            "title": title or pdf_metadata.get("title"),
-            "author": author or pdf_metadata.get("author"),
-            "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
-            "text_hash": text_hash,
-            "status": "processing",
-            "total_pages": pdf_metadata.get("total_pages", 0)
-        }
-        
-        book_result = supabase.table("books").insert(book_data).execute()
-        book_id = book_result.data[0]["id"]
-        user_id = current_user["id"]
-        
-        # Grant access to user (as owner)
-        supabase.table("user_book_access").insert({
-            "user_id": user_id,
-            "book_id": book_id,
-            "is_owner": True,
-            "is_visible": True
-        }).execute()
+        # Check if we're in retry mode (book exists with error status)
+        if retry_mode:
+            # Update existing book record instead of creating new one
+            book_data = {
+                "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
+                "text_hash": text_hash,
+                "status": "processing",
+                "total_pages": pdf_metadata.get("total_pages", 0),
+                "processing_error": None
+            }
+            # Update title/author if provided or extracted
+            if title or pdf_metadata.get("title"):
+                book_data["title"] = title or pdf_metadata.get("title")
+            if author or pdf_metadata.get("author"):
+                book_data["author"] = author or pdf_metadata.get("author")
+            
+            supabase.table("books").update(book_data).eq("id", book_id).execute()
+            print(f"✅ Updated existing book {book_id} for retry")
+        else:
+            # Create new book record
+            book_data = {
+                "original_filename": file.filename,
+                "file_type": file_type,
+                "file_size": file_size,
+                "file_hash": file_hash,
+                "file_path": storage_path,
+                "title": title or pdf_metadata.get("title"),
+                "author": author or pdf_metadata.get("author"),
+                "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
+                "text_hash": text_hash,
+                "status": "processing",
+                "total_pages": pdf_metadata.get("total_pages", 0)
+            }
+            
+            book_result = supabase.table("books").insert(book_data).execute()
+            book_id = book_result.data[0]["id"]
+            user_id = current_user["id"]
+            
+            # Grant access to user (as owner)
+            supabase.table("user_book_access").insert({
+                "user_id": user_id,
+                "book_id": book_id,
+                "is_owner": True,
+                "is_visible": True
+            }).execute()
         
         # Process book in background
         if background_tasks:
@@ -401,16 +451,60 @@ async def list_books(
     return {"books": books}
 
 @router.get("/{book_id}")
-async def get_book(book_id: str):
-    """Get book details"""
-    supabase = get_supabase_client()
+async def get_book(
+    book_id: str,
+    current_user: dict = Depends(get_current_user),
+    include_status: bool = True
+):
+    """
+    Get book details with processing status and chunk information
     
+    Query params:
+    - include_status: Include chunk counts and processing status (default: true)
+    """
+    # Use admin client to bypass RLS
+    supabase = get_supabase_admin_client()
+    
+    # Get book details
     result = supabase.table("books").select("*").eq("id", book_id).execute()
     
     if not result.data:
         raise HTTPException(status_code=404, detail="Book not found")
     
-    return {"book": result.data[0]}
+    book = result.data[0]
+    
+    # Check if user has access
+    access_check = supabase.table("user_book_access").select("*").eq("user_id", current_user["id"]).eq("book_id", book_id).eq("is_visible", True).execute()
+    
+    if not access_check.data and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Include processing status if requested
+    if include_status:
+        # Get chunk counts
+        parent_chunks = supabase.table("parent_chunks").select("id", count="exact").eq("book_id", book_id).execute()
+        child_chunks = supabase.table("child_chunks").select("id", count="exact").eq("book_id", book_id).execute()
+        
+        parent_count = parent_chunks.count if hasattr(parent_chunks, 'count') else len(parent_chunks.data)
+        child_count = child_chunks.count if hasattr(child_chunks, 'count') else len(child_chunks.data)
+        
+        # Check if chunks have embeddings
+        chunks_with_embeddings = supabase.table("child_chunks").select("id", count="exact").eq("book_id", book_id).not_.is_("embedding", "null").execute()
+        embedded_count = chunks_with_embeddings.count if hasattr(chunks_with_embeddings, 'count') else len(chunks_with_embeddings.data)
+        
+        book["processing_info"] = {
+            "status": book.get("status", "unknown"),
+            "parent_chunks_count": parent_count,
+            "child_chunks_count": child_count,
+            "embeddings_count": embedded_count,
+            "is_ready": book.get("status") == "ready" and child_count > 0 and embedded_count > 0,
+            "has_errors": book.get("status") == "error",
+            "processing_error": book.get("processing_error"),
+            "processed_at": book.get("processed_at"),
+            "total_pages": book.get("total_pages", 0)
+        }
+    
+    return {"book": book}
 
 @router.delete("/{book_id}")
 async def delete_book(
