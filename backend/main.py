@@ -16,6 +16,7 @@ app = FastAPI(
 )
 
 # CORS Configuration
+from app.config import settings
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
