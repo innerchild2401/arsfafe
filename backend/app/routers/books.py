@@ -450,6 +450,53 @@ async def list_books(
     
     return {"books": books}
 
+@router.get("/{book_id}/chunks")
+async def get_book_chunks(
+    book_id: str,
+    current_user: dict = Depends(get_current_user),
+    chunk_type: str = "all"  # "parent", "child", or "all"
+):
+    """
+    Get chunks for a book
+    
+    Query params:
+    - chunk_type: "parent", "child", or "all" (default: "all")
+    """
+    supabase = get_supabase_admin_client()
+    
+    # Check if user has access
+    access_check = supabase.table("user_book_access").select("*").eq("user_id", current_user["id"]).eq("book_id", book_id).eq("is_visible", True).execute()
+    
+    if not access_check.data and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    chunks = {}
+    
+    # Get parent chunks
+    if chunk_type in ["parent", "all"]:
+        parent_result = supabase.table("parent_chunks").select(
+            "id, chapter_title, section_title, full_text, topic_labels, chunk_index, created_at"
+        ).eq("book_id", book_id).order("chunk_index").execute()
+        chunks["parent_chunks"] = parent_result.data or []
+    
+    # Get child chunks
+    if chunk_type in ["child", "all"]:
+        child_result = supabase.table("child_chunks").select(
+            "id, text, parent_id, paragraph_index, page_number, created_at, parent_chunks(chapter_title, section_title)"
+        ).eq("book_id", book_id).order("paragraph_index").execute()
+        chunks["child_chunks"] = child_result.data or []
+    
+    # Get chunk counts
+    parent_count = supabase.table("parent_chunks").select("id", count="exact").eq("book_id", book_id).execute()
+    child_count = supabase.table("child_chunks").select("id", count="exact").eq("book_id", book_id).execute()
+    
+    chunks["counts"] = {
+        "parent_chunks": parent_count.count if hasattr(parent_count, 'count') else len(parent_count.data),
+        "child_chunks": child_count.count if hasattr(child_count, 'count') else len(child_count.data)
+    }
+    
+    return chunks
+
 @router.get("/{book_id}")
 async def get_book(
     book_id: str,

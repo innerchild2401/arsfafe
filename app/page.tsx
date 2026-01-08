@@ -2,23 +2,10 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-export default async function Home() {
-  // Check if Supabase environment variables are set
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center p-24">
-        <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm">
-          <h1 className="text-4xl font-bold text-center mb-8 text-red-600">
-            Configuration Error
-          </h1>
-          <p className="text-center text-gray-600 mb-8">
-            Supabase environment variables are not set. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel project settings.
-          </p>
-        </div>
-      </main>
-    )
-  }
+// Force dynamic rendering to ensure environment variables are available
+export const dynamic = 'force-dynamic'
 
+export default async function Home() {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
