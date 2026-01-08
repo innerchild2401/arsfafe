@@ -83,8 +83,10 @@ async def upload_book(
         existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
         
         if existing_book.data:
-            # Book exists - grant access to user
-            book_id = existing_book.data[0]["id"]
+            # Book exists - check status and grant access
+            book = existing_book.data[0]
+            book_id = book["id"]
+            book_status = book.get("status", "uploaded")
             user_id = current_user["id"]
             
             # Check if user already has access
@@ -98,11 +100,51 @@ async def upload_book(
                     "is_owner": False,
                     "is_visible": True
                 }).execute()
+                message = "Book already exists. Access granted."
+            else:
+                # User already has access
+                message = "Book already exists and you already have access."
             
+            # Log status for debugging
+            print(f"✅ Duplicate book detected: {book_id}, status: {book_status}, user has access: {bool(access_check.data)}")
+            
+            # If book is already processed successfully, return immediately (no GPT calls)
+            if book_status == "ready":
+                print(f"✅ Book {book_id} is already processed (status: ready). Skipping processing.")
+                return JSONResponse({
+                    "book_id": book_id,
+                    "status": "existing",
+                    "book_status": "ready",
+                    "message": message + " Book is ready for use."
+                })
+            
+            # If book is still processing, return but don't reprocess
+            if book_status == "processing":
+                print(f"⏳ Book {book_id} is still processing. Access granted, but processing continues.")
+                return JSONResponse({
+                    "book_id": book_id,
+                    "status": "existing",
+                    "book_status": "processing",
+                    "message": message + " Book is still being processed."
+                })
+            
+            # If book had an error, we could retry processing, but for now just grant access
+            # (User can manually retry if needed, or we could add a retry endpoint)
+            if book_status == "error":
+                print(f"⚠️ Book {book_id} previously failed processing (status: error). Access granted.")
+                return JSONResponse({
+                    "book_id": book_id,
+                    "status": "existing",
+                    "book_status": "error",
+                    "message": message + " Book previously failed processing. You can try uploading again to retry."
+                })
+            
+            # Default case (status: uploaded) - should not happen if processing completed
             return JSONResponse({
                 "book_id": book_id,
                 "status": "existing",
-                "message": "Book already exists. Access granted."
+                "book_status": book_status,
+                "message": message
             })
         
         # New book - upload to Supabase Storage first
