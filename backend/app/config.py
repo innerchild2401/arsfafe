@@ -1,10 +1,17 @@
 """
 Configuration settings
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+        env_ignore_empty=True
+    )
+    
     # Supabase
     supabase_url: str
     supabase_key: str
@@ -12,11 +19,6 @@ class Settings(BaseSettings):
     
     # OpenAI
     openai_api_key: str
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"
     
     # DeepSeek OCR (optional, commented out for now)
     # deepseek_ocr_api_key: str = ""
