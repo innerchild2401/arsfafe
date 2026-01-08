@@ -29,8 +29,26 @@ OPENAI_API_KEY=your_openai_api_key
 CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
 ```
 
-### Step 4: Redeploy
-Click **"Redeploy"** button
+### Step 4: Make Service Public (Get Public URL)
+1. In Railway, go to your service
+2. Click on the **"Settings"** tab
+3. Scroll down to **"Networking"** section
+4. Look for **"Public Networking"** or **"Generate Domain"** option
+5. Enable it or click **"Generate Domain"**
+6. Railway will create a public URL like: `https://your-app.railway.app`
+7. Copy this URL
+
+**OR**
+
+1. In Railway, go to your service
+2. Click on the **"Settings"** tab  
+3. Scroll to **"Networking"** or **"Public"** section
+4. Find **"Public Domain"** or **"Custom Domain"**
+5. Click **"Generate Domain"** or **"Make Public"**
+6. Copy the public URL
+
+### Step 5: Redeploy
+Click **"Redeploy"** button (if needed)
 
 ---
 
