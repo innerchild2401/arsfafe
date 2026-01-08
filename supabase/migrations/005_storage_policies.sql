@@ -20,14 +20,16 @@
 
 -- Policy: Authenticated users can view all files in the books bucket
 -- This allows users to access their uploaded books
-CREATE POLICY IF NOT EXISTS "Authenticated users can view books"
+DROP POLICY IF EXISTS "Authenticated users can view books" ON storage.objects;
+CREATE POLICY "Authenticated users can view books"
 ON storage.objects FOR SELECT
 TO authenticated
 USING (bucket_id = 'books');
 
 -- Policy: Authenticated users can upload files to the books bucket
 -- This allows users to upload their books
-CREATE POLICY IF NOT EXISTS "Authenticated users can upload books"
+DROP POLICY IF EXISTS "Authenticated users can upload books" ON storage.objects;
+CREATE POLICY "Authenticated users can upload books"
 ON storage.objects FOR INSERT
 TO authenticated
 WITH CHECK (bucket_id = 'books');
@@ -36,7 +38,8 @@ WITH CHECK (bucket_id = 'books');
 -- This allows users to replace/update files they uploaded
 -- Note: This uses the owner metadata. If you want to track ownership differently,
 -- you may need to adjust this policy based on your file naming convention.
-CREATE POLICY IF NOT EXISTS "Users can update own books"
+DROP POLICY IF EXISTS "Users can update own books" ON storage.objects;
+CREATE POLICY "Users can update own books"
 ON storage.objects FOR UPDATE
 TO authenticated
 USING (bucket_id = 'books' AND (storage.foldername(name))[1] = auth.uid()::text)
@@ -44,14 +47,16 @@ WITH CHECK (bucket_id = 'books' AND (storage.foldername(name))[1] = auth.uid()::
 
 -- Policy: Users can delete their own files
 -- Similar to update, this allows users to delete files they uploaded
-CREATE POLICY IF NOT EXISTS "Users can delete own books"
+DROP POLICY IF EXISTS "Users can delete own books" ON storage.objects;
+CREATE POLICY "Users can delete own books"
 ON storage.objects FOR DELETE
 TO authenticated
 USING (bucket_id = 'books' AND (storage.foldername(name))[1] = auth.uid()::text);
 
 -- Policy: Admins can do everything
 -- This allows admins to manage all files regardless of ownership
-CREATE POLICY IF NOT EXISTS "Admins can manage all books"
+DROP POLICY IF EXISTS "Admins can manage all books" ON storage.objects;
+CREATE POLICY "Admins can manage all books"
 ON storage.objects FOR ALL
 TO authenticated
 USING (
@@ -78,13 +83,15 @@ WITH CHECK (
 -- DROP POLICY IF EXISTS "Users can update own books" ON storage.objects;
 -- DROP POLICY IF EXISTS "Users can delete own books" ON storage.objects;
 
--- CREATE POLICY IF NOT EXISTS "Authenticated users can update books"
+-- DROP POLICY IF EXISTS "Authenticated users can update books" ON storage.objects;
+-- CREATE POLICY "Authenticated users can update books"
 -- ON storage.objects FOR UPDATE
 -- TO authenticated
 -- USING (bucket_id = 'books')
 -- WITH CHECK (bucket_id = 'books');
 
--- CREATE POLICY IF NOT EXISTS "Authenticated users can delete books"
+-- DROP POLICY IF EXISTS "Authenticated users can delete books" ON storage.objects;
+-- CREATE POLICY "Authenticated users can delete books"
 -- ON storage.objects FOR DELETE
 -- TO authenticated
 -- USING (bucket_id = 'books');
