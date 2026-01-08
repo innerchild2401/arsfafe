@@ -24,6 +24,11 @@ from app.services.storage_service import upload_file_to_storage
 
 router = APIRouter()
 
+@router.get("/test")
+async def test_books_router():
+    """Test endpoint to verify router is working"""
+    return {"message": "Books router is working", "status": "ok"}
+
 @router.post("/upload")
 async def upload_book(
     file: UploadFile = File(...),

@@ -88,13 +88,39 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-# Import routers
-from app.routers import books, auth, admin, chat
+@app.get("/routes")
+async def list_routes():
+    """List all registered routes for debugging"""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods),
+                "name": getattr(route, 'name', 'unknown')
+            })
+    return {"routes": routes}
 
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(books.router, prefix="/api/books", tags=["books"])
-app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# Import routers
+try:
+    from app.routers import books, auth, admin, chat
+    
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(books.router, prefix="/api/books", tags=["books"])
+    app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+    app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+    
+    print("✅ All routers registered successfully")
+    # Print all registered routes for debugging
+    print("📋 Registered routes:")
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            print(f"  {list(route.methods)} {route.path}")
+except Exception as e:
+    print(f"❌ Failed to load routers: {e}")
+    import traceback
+    traceback.print_exc()
+    raise
 
 if __name__ == "__main__":
     import uvicorn

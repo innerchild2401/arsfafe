@@ -34,17 +34,45 @@ async def get_current_user(
             )
         
         user_id = user_response.user.id
+        user_email = user_response.user.email or ""
         
         # Get user profile
         profile_response = supabase.table("user_profiles").select("*").eq("id", user_id).execute()
         
         if not profile_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User profile not found"
-            )
-        
-        profile = profile_response.data[0]
+            # Profile doesn't exist - create it (fallback if trigger didn't fire)
+            print(f"⚠️ User profile not found for {user_id}, creating one...")
+            try:
+                # Get full_name from user metadata if available
+                full_name = None
+                if hasattr(user_response.user, 'user_metadata') and user_response.user.user_metadata:
+                    full_name = user_response.user.user_metadata.get('full_name')
+                
+                # Create profile
+                create_response = supabase.table("user_profiles").insert({
+                    "id": user_id,
+                    "email": user_email,
+                    "full_name": full_name,
+                    "role": "user",
+                    "status": "pending"
+                }).execute()
+                
+                if create_response.data:
+                    profile = create_response.data[0]
+                    print(f"✅ Created user profile for {user_id}")
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create user profile"
+                    )
+            except Exception as e:
+                print(f"❌ Failed to create user profile: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"User profile not found and could not be created: {str(e)}"
+                )
+        else:
+            profile = profile_response.data[0]
         
         # Check if user is approved
         if profile["status"] != "approved":
