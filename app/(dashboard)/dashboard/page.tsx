@@ -93,7 +93,7 @@ export default async function DashboardPage() {
           {userProfile.role === 'admin' && (
             <Link
               href="/admin"
-              className="rounded-md bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
+              className="rounded-md bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-white hover:from-purple-700 hover:to-indigo-700 shadow-sm transition-all"
             >
               Admin Panel
             </Link>
