@@ -74,30 +74,30 @@ async def upload_book(
         supabase = get_supabase_client()
         
         existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
-    
-    if existing_book.data:
-        # Book exists - grant access to user
-        book_id = existing_book.data[0]["id"]
-        user_id = current_user["id"]
         
-        # Check if user already has access
-        access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).execute()
-        
-        if not access_check.data:
-            # Grant access to existing book
-            supabase.table("user_book_access").insert({
-                "user_id": user_id,
+        if existing_book.data:
+            # Book exists - grant access to user
+            book_id = existing_book.data[0]["id"]
+            user_id = current_user["id"]
+            
+            # Check if user already has access
+            access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).execute()
+            
+            if not access_check.data:
+                # Grant access to existing book
+                supabase.table("user_book_access").insert({
+                    "user_id": user_id,
+                    "book_id": book_id,
+                    "is_owner": False,
+                    "is_visible": True
+                }).execute()
+            
+            return JSONResponse({
                 "book_id": book_id,
-                "is_owner": False,
-                "is_visible": True
-            }).execute()
+                "status": "existing",
+                "message": "Book already exists. Access granted."
+            })
         
-        return JSONResponse({
-            "book_id": book_id,
-            "status": "existing",
-            "message": "Book already exists. Access granted."
-        })
-    
         # New book - upload to Supabase Storage first
         print("💾 Uploading file to storage...")
         try:
@@ -160,48 +160,48 @@ async def upload_book(
                 status_code=500,
                 detail=f"Failed to extract text from file: {str(e)}"
             )
-    
-    # Calculate text hash for content-based deduplication
-    text_hash = calculate_text_hash(extracted_text)
-    
-    # Create book record
-    book_data = {
-        "original_filename": file.filename,
-        "file_type": file_type,
-        "file_size": file_size,
-        "file_hash": file_hash,
-        "file_path": storage_path,
-        "title": title or pdf_metadata.get("title"),
-        "author": author or pdf_metadata.get("author"),
-        "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
-        "text_hash": text_hash,
-        "status": "processing",
-        "total_pages": pdf_metadata.get("total_pages", 0)
-    }
-    
-    book_result = supabase.table("books").insert(book_data).execute()
-    book_id = book_result.data[0]["id"]
-    user_id = current_user["id"]
-    
-    # Grant access to user (as owner)
-    supabase.table("user_book_access").insert({
-        "user_id": user_id,
-        "book_id": book_id,
-        "is_owner": True,
-        "is_visible": True
-    }).execute()
-    
-    # Process book in background
-    if background_tasks:
-        background_tasks.add_task(
-            process_book,
-            book_id=book_id,
-            extracted_text=extracted_text,
-            file_type=file_type,
-            title=book_data["title"],
-            author=book_data["author"]
-        )
-    
+        
+        # Calculate text hash for content-based deduplication
+        text_hash = calculate_text_hash(extracted_text)
+        
+        # Create book record
+        book_data = {
+            "original_filename": file.filename,
+            "file_type": file_type,
+            "file_size": file_size,
+            "file_hash": file_hash,
+            "file_path": storage_path,
+            "title": title or pdf_metadata.get("title"),
+            "author": author or pdf_metadata.get("author"),
+            "extracted_text": extracted_text[:10000],  # Store first 10K chars for preview
+            "text_hash": text_hash,
+            "status": "processing",
+            "total_pages": pdf_metadata.get("total_pages", 0)
+        }
+        
+        book_result = supabase.table("books").insert(book_data).execute()
+        book_id = book_result.data[0]["id"]
+        user_id = current_user["id"]
+        
+        # Grant access to user (as owner)
+        supabase.table("user_book_access").insert({
+            "user_id": user_id,
+            "book_id": book_id,
+            "is_owner": True,
+            "is_visible": True
+        }).execute()
+        
+        # Process book in background
+        if background_tasks:
+            background_tasks.add_task(
+                process_book,
+                book_id=book_id,
+                extracted_text=extracted_text,
+                file_type=file_type,
+                title=book_data["title"],
+                author=book_data["author"]
+            )
+        
         return JSONResponse({
             "book_id": book_id,
             "status": "uploaded",
