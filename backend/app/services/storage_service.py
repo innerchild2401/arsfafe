@@ -2,7 +2,7 @@
 Supabase Storage service for file uploads
 """
 from supabase import Client
-from app.database import get_supabase_client
+from app.database import get_supabase_admin_client
 from typing import Optional
 import uuid
 
@@ -19,13 +19,14 @@ def upload_file_to_storage(
         file_content: File content as bytes
         filename: Original filename
         folder: Storage folder (default: "books")
-        supabase: Optional Supabase client (will create if not provided)
+        supabase: Optional Supabase client (will use admin client if not provided)
     
     Returns:
         Storage path of uploaded file
     """
     if not supabase:
-        supabase = get_supabase_client()
+        # Use admin client to bypass RLS for backend operations
+        supabase = get_supabase_admin_client()
     
     # Generate unique filename
     file_ext = filename.split('.')[-1] if '.' in filename else ''
@@ -67,13 +68,14 @@ def get_file_from_storage(
     
     Args:
         storage_path: Path in storage (e.g., "books/filename.pdf")
-        supabase: Optional Supabase client
+        supabase: Optional Supabase client (will use admin client if not provided)
     
     Returns:
         File content as bytes
     """
     if not supabase:
-        supabase = get_supabase_client()
+        # Use admin client to bypass RLS for backend operations
+        supabase = get_supabase_admin_client()
     
     try:
         # Extract folder and filename
@@ -98,10 +100,11 @@ def delete_file_from_storage(
     
     Args:
         storage_path: Path in storage
-        supabase: Optional Supabase client
+        supabase: Optional Supabase client (will use admin client if not provided)
     """
     if not supabase:
-        supabase = get_supabase_client()
+        # Use admin client to bypass RLS for backend operations
+        supabase = get_supabase_admin_client()
     
     try:
         # Extract folder and filename
