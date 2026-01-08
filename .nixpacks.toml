@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ["python311", "python311Packages.pip"]
+nixPkgs = ["python311", "python311Packages.pip", "python311Packages.virtualenv"]
 
 [phases.install]
 cmds = [
+  "python -m venv /opt/venv",
+  "source /opt/venv/bin/activate",
+  "pip install --upgrade pip",
   "pip install -r requirements.txt"
 ]
 
@@ -10,7 +13,8 @@ cmds = [
 cmds = []
 
 [start]
-cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+cmd = "source /opt/venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port $PORT"
 
 [variables]
 PYTHONUNBUFFERED = "1"
+PATH = "/opt/venv/bin:$PATH"
