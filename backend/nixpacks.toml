@@ -7,14 +7,14 @@ cmds = [
   "source /opt/venv/bin/activate",
   "pip install --upgrade pip",
   "pip install -r requirements.txt",
-  "chmod +x start.sh || true"
+  "chmod +x start.sh"
 ]
 
 [phases.build]
 cmds = []
 
 [start]
-cmd = "bash start.sh"
+cmd = "/bin/bash /app/start.sh"
 
 [variables]
 PYTHONUNBUFFERED = "1"
