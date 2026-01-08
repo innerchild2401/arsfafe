@@ -55,6 +55,42 @@ async def chat(
             detail="No books available. Please upload a book first."
         )
     
+    # Check if user is asking about the assistant's name
+    user_message_lower = chat_message.message.lower()
+    name_questions = ["what is your name", "who are you", "what's your name", "what are you called", "tell me your name"]
+    is_name_question = any(question in user_message_lower for question in name_questions)
+    
+    # If asking about name, respond directly without searching books
+    if is_name_question:
+        assistant_message = "Hello! I'm Zorxido, your AI assistant for exploring your books. I'm here to help you understand and navigate through the content you've uploaded. How can I assist you today?"
+        
+        # Save messages
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "user",
+            "content": chat_message.message,
+            "tokens_used": None,
+            "model_used": None
+        }).execute()
+        
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "assistant",
+            "content": assistant_message,
+            "retrieved_chunks": [],
+            "sources": [],
+            "tokens_used": None,
+            "model_used": "direct_response"
+        }).execute()
+        
+        return ChatResponse(
+            response=assistant_message,
+            sources=[],
+            tokens_used=None
+        )
+    
     # Generate query embedding
     query_embedding = generate_embedding(chat_message.message)
     
@@ -87,9 +123,34 @@ async def chat(
         chunks = chunks[:5]
     
     if not chunks:
-        raise HTTPException(
-            status_code=404,
-            detail="No relevant content found in your books."
+        # If no chunks found, still try to answer general questions
+        assistant_message = "I couldn't find relevant information in your uploaded books to answer that question. Could you try rephrasing it, or ask about a specific topic that might be covered in your books?"
+        
+        # Save messages
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "user",
+            "content": chat_message.message,
+            "tokens_used": None,
+            "model_used": None
+        }).execute()
+        
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "assistant",
+            "content": assistant_message,
+            "retrieved_chunks": [],
+            "sources": [],
+            "tokens_used": None,
+            "model_used": "no_context_response"
+        }).execute()
+        
+        return ChatResponse(
+            response=assistant_message,
+            sources=[],
+            tokens_used=None
         )
     
     # Build context from chunks
@@ -119,12 +180,20 @@ async def chat(
     
     client = OpenAI(api_key=settings.openai_api_key)
     
+    # System prompt with name
+    system_prompt = """You are Zorxido, a helpful AI assistant that answers questions based on the provided context from books. 
+- Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
+- You are designed to help users understand and explore their uploaded books.
+- Always cite your sources from the provided context.
+- If the context doesn't contain enough information to answer a question, politely say so and explain that you can only answer based on the books the user has uploaded.
+- Stay focused on the content from the user's books. If asked about topics not in the books, politely redirect to what you can help with based on their uploaded content."""
+    
     response = client.chat.completions.create(
         model=settings.chat_model,
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant that answers questions based on the provided context from books. Always cite your sources. If the context doesn't contain enough information, say so."
+                "content": system_prompt
             },
             {
                 "role": "user",
