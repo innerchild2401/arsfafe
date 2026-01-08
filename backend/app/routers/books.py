@@ -244,7 +244,8 @@ async def process_book(
     4. Store in database
     """
     try:
-        supabase = get_supabase_client()
+        # Use admin client for background processing to bypass RLS
+        supabase = get_supabase_admin_client()
         
         # Update status
         supabase.table("books").update({
@@ -317,8 +318,9 @@ async def process_book(
         
     except Exception as e:
         # Update book status to error
-        supabase = get_supabase_client()
-        supabase.table("books").update({
+        # Use admin client to bypass RLS
+        error_supabase = get_supabase_admin_client()
+        error_supabase.table("books").update({
             "status": "error",
             "processing_error": str(e)
         }).eq("id", book_id).execute()
