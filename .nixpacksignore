@@ -1,0 +1,10 @@
+package.json
+package-lock.json
+node_modules/
+.next/
+app/
+lib/
+public/
+middleware.ts
+tsconfig.json
+next.config.js
