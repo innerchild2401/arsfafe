@@ -119,15 +119,54 @@ async def upload_book(
                     "message": message + " Book is ready for use."
                 })
             
-            # If book is still processing, return but don't reprocess
+            # If book is still processing, check if it's been stuck
             if book_status == "processing":
-                print(f"⏳ Book {book_id} is still processing. Access granted, but processing continues.")
-                return JSONResponse({
-                    "book_id": book_id,
-                    "status": "existing",
-                    "book_status": "processing",
-                    "message": message + " Book is still being processed."
-                })
+                # Check if processing has been stuck for more than 30 minutes
+                from datetime import datetime, timedelta
+                book_updated_at = book.get("updated_at")
+                if book_updated_at:
+                    try:
+                        updated_time = datetime.fromisoformat(book_updated_at.replace('Z', '+00:00'))
+                        if isinstance(updated_time, datetime):
+                            time_since_update = datetime.utcnow() - updated_time.replace(tzinfo=None)
+                            if time_since_update > timedelta(minutes=30):
+                                # Processing is stuck - allow retry
+                                print(f"⚠️ Book {book_id} has been processing for {time_since_update}. Allowing retry.")
+                                retry_mode = True
+                                # Update status to error first, then retry
+                                supabase.table("books").update({
+                                    "status": "error",
+                                    "processing_error": "Processing timeout - stuck for more than 30 minutes"
+                                }).eq("id", book_id).execute()
+                                book_status = "error"
+                                # Continue to retry logic below
+                            else:
+                                # Still processing normally
+                                print(f"⏳ Book {book_id} is still processing (started {time_since_update} ago). Access granted, but processing continues.")
+                                return JSONResponse({
+                                    "book_id": book_id,
+                                    "status": "existing",
+                                    "book_status": "processing",
+                                    "message": message + " Book is still being processed."
+                                })
+                    except Exception as e:
+                        print(f"⚠️ Could not check processing timeout: {str(e)}. Allowing retry.")
+                        # If we can't check the time, assume it's stuck and allow retry
+                        retry_mode = True
+                        supabase.table("books").update({
+                            "status": "error",
+                            "processing_error": "Processing timeout check failed"
+                        }).eq("id", book_id).execute()
+                        book_status = "error"
+                else:
+                    # No updated_at timestamp - assume it's stuck and allow retry
+                    print(f"⚠️ Book {book_id} is processing but has no updated_at timestamp. Allowing retry.")
+                    retry_mode = True
+                    supabase.table("books").update({
+                        "status": "error",
+                        "processing_error": "Processing status with no timestamp - assuming stuck"
+                    }).eq("id", book_id).execute()
+                    book_status = "error"
             
             # If book had an error, allow retry by continuing with processing
             if book_status == "error":
