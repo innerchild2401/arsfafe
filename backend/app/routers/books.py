@@ -291,21 +291,46 @@ async def upload_book(
                 "is_visible": True
             }).execute()
         
-        # Process book in background
-        if background_tasks:
-            print(f"🔄 Adding background processing task for book {book_id}")
-            print(f"📊 Extracted text length for processing: {len(extracted_text)} characters")
-            background_tasks.add_task(
-                process_book,
-                book_id=book_id,
-                extracted_text=extracted_text,  # Full extracted text for processing
-                file_type=file_type,
-                title=book_data.get("title"),
-                author=book_data.get("author")
-            )
-            print(f"✅ Background task added successfully")
-        else:
-            print(f"⚠️ WARNING: background_tasks is None - processing will not happen!")
+        # Process book - for now, run synchronously to debug
+        # TODO: Switch back to background task once we confirm it works
+        print(f"🔄 Starting processing for book {book_id} (synchronous for debugging)")
+        print(f"📊 Extracted text length for processing: {len(extracted_text)} characters")
+        
+        # Run processing synchronously for now to see if it works
+        # This will block the response, but it ensures processing happens
+        try:
+            import asyncio
+            # Check if we're in an async context
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context, so we need to run in a thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        process_book,
+                        book_id=book_id,
+                        extracted_text=extracted_text,
+                        file_type=file_type,
+                        title=book_data.get("title"),
+                        author=book_data.get("author")
+                    )
+                    # Don't wait for completion - let it run in background thread
+                    print(f"✅ Processing started in background thread")
+            except RuntimeError:
+                # No async loop, can run directly
+                process_book(
+                    book_id=book_id,
+                    extracted_text=extracted_text,
+                    file_type=file_type,
+                    title=book_data.get("title"),
+                    author=book_data.get("author")
+                )
+                print(f"✅ Processing completed synchronously")
+        except Exception as e:
+            print(f"❌ Error starting processing: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the upload - processing will be retried
         
         return JSONResponse({
             "book_id": book_id,
@@ -477,6 +502,74 @@ async def list_books(
             books.append(book)
     
     return {"books": books}
+
+@router.post("/{book_id}/process")
+async def trigger_processing(
+    book_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Manually trigger processing for a book (for debugging/retry)
+    """
+    supabase = get_supabase_admin_client()
+    
+    # Check if user has access
+    access_check = supabase.table("user_book_access").select("*").eq("user_id", current_user["id"]).eq("book_id", book_id).eq("is_visible", True).execute()
+    
+    if not access_check.data and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get book
+    book_result = supabase.table("books").select("*").eq("id", book_id).execute()
+    if not book_result.data:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    book = book_result.data[0]
+    
+    # Check if book has extracted text
+    extracted_text = book.get("extracted_text", "")
+    if not extracted_text or len(extracted_text) < 100:
+        raise HTTPException(status_code=400, detail="Book has no extracted text to process")
+    
+    # Update status to processing
+    supabase.table("books").update({
+        "status": "processing",
+        "processing_error": None
+    }).eq("id", book_id).execute()
+    
+    # Start processing
+    print(f"🔄 Manually triggering processing for book {book_id}")
+    try:
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    process_book,
+                    book_id=book_id,
+                    extracted_text=extracted_text,
+                    file_type=book.get("file_type", "pdf"),
+                    title=book.get("title"),
+                    author=book.get("author")
+                )
+                print(f"✅ Processing started in background thread")
+        except RuntimeError:
+            process_book(
+                book_id=book_id,
+                extracted_text=extracted_text,
+                file_type=book.get("file_type", "pdf"),
+                title=book.get("title"),
+                author=book.get("author")
+            )
+            print(f"✅ Processing completed synchronously")
+        
+        return {"message": "Processing started", "book_id": book_id}
+    except Exception as e:
+        print(f"❌ Error starting processing: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to start processing: {str(e)}")
 
 @router.get("/{book_id}/chunks")
 async def get_book_chunks(
