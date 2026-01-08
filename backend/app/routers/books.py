@@ -41,28 +41,39 @@ async def upload_book(
     - Automatic text extraction
     - Background processing
     """
-    # Check usage limits
-    check_usage_limits(current_user, "books")
-    
-    # Validate file type
-    if not is_valid_file_type(file.filename):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file type. Only PDF and EPUB files are supported."
-        )
-    
-    # Read file content
-    file_content = await file.read()
-    file_size = len(file_content)
-    file_type = get_file_extension(file.filename)
-    
-    # Calculate file hash for deduplication
-    file_hash = calculate_file_hash(file_content)
-    
-    # Check if book already exists
-    supabase = get_supabase_client()
-    
-    existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
+    try:
+        print(f"📤 Upload request from user {current_user.get('id')} for file: {file.filename}")
+        
+        # Check usage limits
+        check_usage_limits(current_user, "books")
+        
+        # Validate file type
+        if not file.filename or not is_valid_file_type(file.filename):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only PDF and EPUB files are supported."
+            )
+        
+        # Read file content
+        file_content = await file.read()
+        file_size = len(file_content)
+        file_type = get_file_extension(file.filename)
+        
+        print(f"📄 File info: {file.filename}, size: {file_size} bytes, type: {file_type}")
+        
+        if file_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="File is empty"
+            )
+        
+        # Calculate file hash for deduplication
+        file_hash = calculate_file_hash(file_content)
+        
+        # Check if book already exists
+        supabase = get_supabase_client()
+        
+        existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
     
     if existing_book.data:
         # Book exists - grant access to user
@@ -87,36 +98,68 @@ async def upload_book(
             "message": "Book already exists. Access granted."
         })
     
-    # New book - upload to Supabase Storage first
-    storage_path = upload_file_to_storage(
-        file_content=file_content,
-        filename=file.filename,
-        folder="books",
-        supabase=supabase
-    )
-    
-    # Extract text based on file type
-    if file_type == "pdf":
-        # Traffic light classifier
-        pdf_class = classify_pdf(file_content)
+        # New book - upload to Supabase Storage first
+        print("💾 Uploading file to storage...")
+        try:
+            storage_path = upload_file_to_storage(
+                file_content=file_content,
+                filename=file.filename,
+                folder="books",
+                supabase=supabase
+            )
+            print(f"✅ File uploaded to storage: {storage_path}")
+        except Exception as e:
+            print(f"❌ Storage upload failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload file to storage: {str(e)}"
+            )
         
-        if pdf_class == "simple":
-            # Use PyMuPDF
-            extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
-        else:
-            # Complex PDF - use DeepSeek-OCR (commented out for now)
-            # TODO: Implement DeepSeek-OCR integration
-            # For now, fallback to PyMuPDF
-            extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
-            # extracted_text = await deepseek_ocr_extract(file_content)
-    
-    elif file_type == "epub":
-        extracted_text, epub_metadata = extract_text_from_epub(file_content)
-        pdf_metadata = {
-            "total_pages": epub_metadata.get("total_chapters", 0),
-            "title": epub_metadata.get("title"),
-            "author": epub_metadata.get("author")
-        }
+        # Extract text based on file type
+        print(f"📖 Extracting text from {file_type} file...")
+        try:
+            if file_type == "pdf":
+                # Traffic light classifier
+                pdf_class = classify_pdf(file_content)
+                
+                if pdf_class == "simple":
+                    # Use PyMuPDF
+                    extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
+                else:
+                    # Complex PDF - use DeepSeek-OCR (commented out for now)
+                    # TODO: Implement DeepSeek-OCR integration
+                    # For now, fallback to PyMuPDF
+                    extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
+                    # extracted_text = await deepseek_ocr_extract(file_content)
+            
+            elif file_type == "epub":
+                extracted_text, epub_metadata = extract_text_from_epub(file_content)
+                pdf_metadata = {
+                    "total_pages": epub_metadata.get("total_chapters", 0),
+                    "title": epub_metadata.get("title"),
+                    "author": epub_metadata.get("author")
+                }
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file type: {file_type}"
+                )
+            
+            if not extracted_text or len(extracted_text.strip()) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not extract text from file. File may be corrupted or empty."
+                )
+            
+            print(f"✅ Text extracted: {len(extracted_text)} characters")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"❌ Text extraction failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to extract text from file: {str(e)}"
+            )
     
     # Calculate text hash for content-based deduplication
     text_hash = calculate_text_hash(extracted_text)
@@ -159,13 +202,24 @@ async def upload_book(
             author=book_data["author"]
         )
     
-    return JSONResponse({
-        "book_id": book_id,
-        "status": "uploaded",
-        "message": "Book uploaded successfully. Processing in background.",
-        "file_type": file_type,
-        "file_size": format_file_size(file_size)
-    })
+        return JSONResponse({
+            "book_id": book_id,
+            "status": "uploaded",
+            "message": "Book uploaded successfully. Processing in background.",
+            "file_type": file_type,
+            "file_size": format_file_size(file_size)
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Upload failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload failed: {str(e)}"
+        )
 
 async def process_book(
     book_id: str,

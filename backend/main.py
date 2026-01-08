@@ -52,43 +52,32 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
-# Global exception handlers to ensure CORS headers are always sent
+# Global exception handlers
+# Note: CORS middleware should handle headers, but we ensure errors are properly formatted
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions with CORS headers"""
+    """Handle HTTP exceptions"""
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
-            "Access-Control-Allow-Credentials": "true",
-        }
+        content={"detail": exc.detail}
     )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors with CORS headers"""
+    """Handle validation errors"""
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()},
-        headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
-            "Access-Control-Allow-Credentials": "true",
-        }
+        content={"detail": exc.errors()}
     )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """Handle all other exceptions with CORS headers"""
+    """Handle all other exceptions"""
     print(f"❌ Unhandled exception: {exc}")
     print(traceback.format_exc())
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error", "error": str(exc)},
-        headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
-            "Access-Control-Allow-Credentials": "true",
-        }
+        content={"detail": "Internal server error", "error": str(exc)}
     )
 
 @app.get("/")

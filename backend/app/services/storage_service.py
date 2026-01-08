@@ -33,17 +33,30 @@ def upload_file_to_storage(
     storage_path = f"{folder}/{unique_filename}"
     
     try:
+        # Determine content type
+        content_type_map = {
+            "pdf": "application/pdf",
+            "epub": "application/epub+zip"
+        }
+        content_type = content_type_map.get(file_ext.lower(), "application/octet-stream")
+        
         # Upload to Supabase Storage
-        supabase.storage.from_("books").upload(
+        result = supabase.storage.from_("books").upload(
             path=unique_filename,
             file=file_content,
-            file_options={"content-type": f"application/{file_ext}" if file_ext else "application/octet-stream"}
+            file_options={"content-type": content_type, "upsert": "false"}
         )
         
+        print(f"✅ Storage upload result: {result}")
         return storage_path
         
     except Exception as e:
-        raise Exception(f"Failed to upload file to storage: {str(e)}")
+        error_msg = str(e)
+        print(f"❌ Storage upload error: {error_msg}")
+        # Check if it's a bucket/policy issue
+        if "bucket" in error_msg.lower() or "policy" in error_msg.lower():
+            raise Exception(f"Storage bucket 'books' may not exist or you may not have permission. Please create the bucket in Supabase Storage. Error: {error_msg}")
+        raise Exception(f"Failed to upload file to storage: {error_msg}")
 
 def get_file_from_storage(
     storage_path: str,
