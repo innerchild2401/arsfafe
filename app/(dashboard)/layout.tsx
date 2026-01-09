@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import AppShell from '@/components/AppShell'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({
   children,
@@ -17,7 +20,7 @@ export default async function DashboardLayout({
   // Check user status
   const { data: profile } = await supabase
     .from('user_profiles')
-    .select('status')
+    .select('status, role')
     .eq('id', user.id)
     .single()
 
@@ -25,5 +28,9 @@ export default async function DashboardLayout({
     redirect('/pending')
   }
 
-  return <>{children}</>
+  return (
+    <AppShell>
+      {children}
+    </AppShell>
+  )
 }

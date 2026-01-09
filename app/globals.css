@@ -1,3 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
+
 * {
   box-sizing: border-box;
   padding: 0;
@@ -5,8 +9,6 @@
 }
 
 :root {
-  --foreground-rgb: 17, 24, 39;
-  --background-rgb: 255, 255, 255;
   font-size: 16px;
 }
 
@@ -24,10 +26,19 @@ body {
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  color: rgb(250, 250, 250);
+  background: rgb(9, 9, 11); /* zinc-950 */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   line-height: 1.5;
+}
+
+/* Typography */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+.font-serif {
+  font-family: 'Merriweather', Georgia, serif;
 }
 
 /* Touch targets - minimum 44x44px for mobile */
@@ -43,4 +54,140 @@ input[type="button"] {
 button {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+}
+
+/* Underlined Input Style */
+.underlined-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgb(63, 63, 70); /* zinc-700 */
+  border-radius: 0;
+  color: rgb(250, 250, 250);
+  padding: 0.5rem 0;
+  transition: border-color 0.2s;
+}
+
+.underlined-input:focus {
+  outline: none;
+  border-bottom-color: rgb(16, 185, 129); /* emerald-500 */
+  box-shadow: 0 1px 0 0 rgb(16, 185, 129);
+}
+
+.underlined-input::placeholder {
+  color: rgb(113, 113, 122); /* zinc-500 */
+}
+
+/* Signal Color Badges */
+.badge-emerald {
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  color: rgb(52, 211, 153); /* emerald-400 */
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.badge-amber {
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: rgb(251, 191, 36); /* amber-400 */
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.badge-rose {
+  border: 1px solid rgba(244, 63, 94, 0.5);
+  color: rgb(251, 113, 133); /* rose-400 */
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.badge-violet {
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  color: rgb(167, 139, 250); /* violet-400 */
+  background: rgba(139, 92, 246, 0.1);
+}
+
+/* Shimmer Effect for Loading */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(
+    to right,
+    rgb(24, 24, 27) 0%,
+    rgb(39, 39, 42) 20%,
+    rgb(24, 24, 27) 40%,
+    rgb(24, 24, 27) 100%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Zorxido Orb Pulse Animation */
+@keyframes pulse-orb {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+.zorxido-orb {
+  animation: pulse-orb 2s ease-in-out infinite;
+}
+
+.zorxido-orb-active {
+  animation: pulse-orb 0.8s ease-in-out infinite;
+}
+
+/* Radar/Scan Animation */
+@keyframes radar-scan {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.radar-scan {
+  position: relative;
+}
+
+.radar-scan::before,
+.radar-scan::after {
+  content: '';
+  position: absolute;
+  border: 2px solid rgb(16, 185, 129);
+  border-radius: 50%;
+  animation: radar-scan 2s ease-out infinite;
+}
+
+.radar-scan::after {
+  animation-delay: 1s;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(24, 24, 27); /* zinc-900 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(63, 63, 70); /* zinc-700 */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(82, 82, 91); /* zinc-600 */
 }
