@@ -42,7 +42,7 @@ export default async function DashboardPage() {
   return (
     <div className="flex flex-col h-full bg-zinc-950">
       {/* Status Bar - The Knowledge Cockpit Design */}
-      <div className="h-10 border-b border-zinc-800 bg-zinc-900/50 flex items-center px-6">
+      <div className="h-10 border-b border-zinc-800 bg-zinc-900/50 flex items-center px-6 flex-shrink-0">
         <div className="flex items-center gap-6 text-xs font-mono text-zinc-400">
           <span>
             <span className="text-emerald-400">Ready:</span> {readyBooks} Books
