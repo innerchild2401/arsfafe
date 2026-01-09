@@ -23,8 +23,12 @@ CREATE INDEX IF NOT EXISTS idx_processing_logs_created ON processing_logs(book_i
 -- RLS Policies
 ALTER TABLE processing_logs ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can view logs for their books" ON processing_logs;
+DROP POLICY IF EXISTS "Service role can insert logs" ON processing_logs;
+
 -- Users can only see logs for books they have access to
-CREATE POLICY IF NOT EXISTS "Users can view logs for their books"
+CREATE POLICY "Users can view logs for their books"
   ON processing_logs
   FOR SELECT
   USING (
@@ -37,7 +41,7 @@ CREATE POLICY IF NOT EXISTS "Users can view logs for their books"
   );
 
 -- Service role can insert/update logs (for backend processing)
-CREATE POLICY IF NOT EXISTS "Service role can insert logs"
+CREATE POLICY "Service role can insert logs"
   ON processing_logs
   FOR INSERT
   WITH CHECK (true);
