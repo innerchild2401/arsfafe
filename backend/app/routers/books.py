@@ -470,8 +470,14 @@ def process_book(
                 section_title = section.get("section_title") or ""  # Handle None case
                 paragraphs = section.get("paragraphs", [])
                 
+                # Filter and convert paragraphs to strings (handle any non-string types)
+                paragraphs = [
+                    str(p).strip() for p in paragraphs 
+                    if p is not None and str(p).strip()
+                ]
+                
                 # Skip sections with no paragraphs
-                if not paragraphs or not any(p.strip() for p in paragraphs):
+                if not paragraphs:
                     continue
                 
                 # Create parent chunk (full section)
@@ -498,8 +504,8 @@ def process_book(
                 parent_id = parent_result.data[0]["id"]
                 parent_chunks.append({"id": parent_id, "text": parent_text})
                 
-                # Create child chunks (individual paragraphs)
-                child_texts = [para for para in paragraphs if para.strip()]
+                # Create child chunks (individual paragraphs) - already filtered and converted to strings above
+                child_texts = [para for para in paragraphs if para]
                 
                 if child_texts:
                     # Generate embeddings in batch
