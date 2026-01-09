@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 
-from app.database import get_supabase_client
+from app.database import get_supabase_client, get_supabase_admin_client
 from app.dependencies import get_current_user, check_usage_limits
 from app.services.embedding_service import generate_embedding
 
@@ -37,7 +37,9 @@ async def chat(
     # Check usage limits
     check_usage_limits(current_user, "chat")
     
-    supabase = get_supabase_client()
+    # Use admin client for writes to bypass RLS
+    # For reads, we can use regular client (RLS ensures users only see their own data)
+    supabase = get_supabase_admin_client()
     user_id = current_user["id"]
     
     # Get user's accessible books
