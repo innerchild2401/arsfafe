@@ -251,7 +251,8 @@ async def get_chat_history(
     current_user: dict = Depends(get_current_user)
 ):
     """Get chat history"""
-    supabase = get_supabase_client()
+    # Use admin client to bypass RLS (backend operation)
+    supabase = get_supabase_admin_client()
     user_id = current_user["id"]
     
     query = supabase.table("chat_messages").select("*").eq("user_id", user_id)
