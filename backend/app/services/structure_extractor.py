@@ -1,11 +1,13 @@
 """
 Structure extraction service using GPT-4o-mini
 Converts plain text to hierarchical JSON structure
+Uses rolling chunk processing for long books with true cursor-based chunking
 """
 from openai import OpenAI
 from app.config import settings
 import json
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Tuple
 
 client = OpenAI(api_key=settings.openai_api_key)
 
@@ -49,59 +51,83 @@ DOCUMENT_SCHEMA = {
     "required": ["document"]
 }
 
-def prechunk_text(text: str, chunk_size: int = 40000, overlap: int = 1000) -> list:
+def get_safe_chunk_boundary(text: str, start_pos: int, target_size: int, text_length: int) -> Tuple[int, str]:
     """
-    Pre-chunk text into manageable blocks using safe boundaries.
+    Get a safe chunk boundary at or near target_size, splitting at paragraph boundaries.
     
     Args:
-        text: Full text to chunk
-        chunk_size: Target chunk size in characters (default: 40K)
-        overlap: Overlap between chunks in characters (default: 1K)
+        text: Full text
+        start_pos: Starting position for this chunk
+        target_size: Target chunk size in characters (e.g., 40K)
+        text_length: Total length of text
     
     Returns:
-        List of (start_pos, end_pos, chunk_text) tuples
+        Tuple of (end_position, chunk_text)
     """
-    chunks = []
-    current_pos = 0
-    text_length = len(text)
+    end_pos = min(start_pos + target_size, text_length)
     
-    while current_pos < text_length:
-        # Calculate end position for this chunk
-        end_pos = min(current_pos + chunk_size, text_length)
-        
-        # If not at the end, find the nearest safe boundary (double newline)
-        if end_pos < text_length:
-            # Look for double newline within the last 10% of the chunk
-            search_start = max(current_pos + int(chunk_size * 0.9), current_pos)
-            search_end = end_pos
-            
-            # Find last double newline before end_pos
-            last_double_newline = text.rfind('\n\n', search_start, search_end)
-            
-            if last_double_newline > current_pos:
-                # Found a safe boundary
-                end_pos = last_double_newline + 2  # Include the \n\n
-            else:
-                # No double newline found, look for single newline
-                last_newline = text.rfind('\n', search_start, search_end)
-                if last_newline > current_pos:
-                    end_pos = last_newline + 1  # Include the \n
-        
-        # Extract chunk
-        chunk_text = text[current_pos:end_pos]
-        chunks.append((current_pos, end_pos, chunk_text))
-        
-        # Move to next chunk position (with overlap)
-        if end_pos >= text_length:
-            break
-        current_pos = max(current_pos + 1, end_pos - overlap)
+    # If we're at the end, return everything
+    if end_pos >= text_length:
+        return (text_length, text[start_pos:text_length])
     
-    return chunks
+    # Try to find a safe boundary (double newline) within the last 10% of the chunk
+    search_start = max(start_pos + int(target_size * 0.9), start_pos)
+    search_end = end_pos
+    
+    # Find last double newline before end_pos
+    last_double_newline = text.rfind('\n\n', search_start, search_end)
+    
+    if last_double_newline > start_pos:
+        # Found a safe boundary
+        end_pos = last_double_newline + 2  # Include the \n\n
+    else:
+        # No double newline found, look for single newline
+        last_newline = text.rfind('\n', search_start, search_end)
+        if last_newline > start_pos:
+            end_pos = last_newline + 1  # Include the \n
+    
+    chunk_text = text[start_pos:end_pos]
+    return (end_pos, chunk_text)
+
+def find_paragraph_position(text: str, paragraph: str, search_start: int = 0) -> int:
+    """
+    Find the end position of a paragraph in the original text.
+    
+    Args:
+        text: Full text
+        paragraph: Paragraph text to find
+        search_start: Position to start searching from
+    
+    Returns:
+        End position of the paragraph, or -1 if not found
+    """
+    if not paragraph:
+        return -1
+    
+    # Try exact match first
+    pos = text.find(paragraph, search_start)
+    if pos >= 0:
+        return pos + len(paragraph)
+    
+    # Try with last 200 characters (in case of whitespace differences)
+    para_end = paragraph[-200:] if len(paragraph) > 200 else paragraph
+    pos = text.find(para_end, search_start)
+    if pos >= 0:
+        # Found the end marker, calculate full paragraph end
+        # Try to find where this paragraph actually ends
+        potential_end = pos + len(para_end)
+        # Look for next paragraph boundary
+        next_boundary = text.find('\n\n', potential_end, potential_end + 100)
+        if next_boundary > potential_end:
+            return next_boundary
+        return potential_end
+    
+    return -1
 
 def extract_structure(text: str, title: str = None, author: str = None) -> Dict[str, Any]:
     """
     Extract hierarchical structure from text using GPT-4o-mini
-    Uses rolling chunk processing for long books.
+    Uses true rolling chunk processing: each chunk starts where the previous one ended.
     
     Args:
         text: Plain text extracted from PDF/EPUB
@@ -120,8 +146,12 @@ Rules:
 4. Never split paragraphs by token count - only by semantic meaning
 5. Preserve the natural document hierarchy
 6. If a paragraph is very long, you may split it at natural sentence boundaries, but preserve context
-7. CRITICAL: Only process complete paragraphs. If the text ends mid-sentence or mid-paragraph, do NOT include that incomplete fragment.
-8. Return the last complete paragraph you processed so we know where you stopped.
+
+CRITICAL INSTRUCTIONS FOR CHUNK PROCESSING:
+- Only process COMPLETE paragraphs. If the text ends mid-sentence or mid-paragraph, DO NOT include that incomplete fragment.
+- Return the EXACT TEXT of the last complete paragraph you processed in "last_processed_paragraph" field.
+- If the text ends with incomplete text (mid-sentence or mid-paragraph), set "stopped_early" to true and indicate this.
+- The "last_processed_paragraph" is CRITICAL - it tells us exactly where to start the next chunk.
 
 CRITICAL: You MUST return a JSON object with this EXACT structure:
 {
@@ -140,62 +170,55 @@ CRITICAL: You MUST return a JSON object with this EXACT structure:
       }
     ]
   },
-  "last_processed_paragraph": "The last complete paragraph you processed ends here...",
-  "processed_up_to_char": 0
+  "last_processed_paragraph": "The EXACT text of the last complete paragraph you processed, ending here...",
+  "stopped_early": false,
+  "next_chunk_start_hint": "First few words or sentence of what should come next (if stopped_early is true)"
 }
 
-The top-level key MUST be "document". Include "last_processed_paragraph" and "processed_up_to_char" to track progress."""
+The top-level key MUST be "document". Include "last_processed_paragraph", "stopped_early", and "next_chunk_start_hint" for chunk continuity."""
 
     # GPT-4o-mini has 128K token context window (~500K characters)
-    # For long books, use rolling chunk processing
-    chunk_size = 40000  # 40K characters per chunk
-    overlap = 1000  # 1K character overlap
+    # For long books, use rolling chunk processing with 40K char chunks
+    chunk_size = 40000  # 40K characters per chunk (small to avoid hallucinations)
     
-    if len(text) > chunk_size:
-        # Use rolling chunk processing for long books
-        print(f"📚 Book is long ({len(text)} chars). Processing in rolling chunks...")
+    text_length = len(text)
+    
+    if text_length > chunk_size:
+        # Use true rolling chunk processing for long books
+        print(f"📚 Book is long ({text_length} chars). Processing with rolling cursor (40K chunks)...")
         
-        # Step 1: Pre-chunk the text into safe blocks
-        chunks = prechunk_text(text, chunk_size, overlap)
-        print(f"✅ Pre-chunked into {len(chunks)} blocks")
-        
-        # Step 2: Process each chunk sequentially with rolling cursor
         accumulated_chapters = {}  # Track chapters across chunks (keyed by chapter title)
-        last_processed_paragraph = ""  # Track last paragraph for rolling cursor
+        current_pos = 0  # True rolling cursor - start at beginning
+        chunk_number = 0
         
-        for chunk_idx, (start_pos, end_pos, chunk_text) in enumerate(chunks):
-            print(f"📖 Processing chunk {chunk_idx + 1}/{len(chunks)} (chars {start_pos}-{end_pos}, {len(chunk_text)} chars)...")
+        while current_pos < text_length:
+            chunk_number += 1
+            print(f"\n📖 Processing chunk {chunk_number} starting at char {current_pos}...")
             
-            # If we have a last processed paragraph from previous chunk, find where to start
-            if last_processed_paragraph and chunk_idx > 0:
-                # Find the last processed paragraph in the current chunk's overlap area
-                # The overlap ensures we have context, but we should skip already-processed content
-                para_end_marker = last_processed_paragraph[-100:]  # Use last 100 chars for matching
-                overlap_start = max(0, start_pos - overlap)
-                overlap_text = text[overlap_start:start_pos + min(overlap, len(chunk_text))]
-                
-                # Try to find where this chunk should actually start (after last processed paragraph)
-                para_end_pos = overlap_text.rfind(para_end_marker)
-                if para_end_pos >= 0:
-                    # Found the end of last paragraph in overlap, skip to next paragraph
-                    next_para_start = text.find('\n\n', overlap_start + para_end_pos + len(para_end_marker), end_pos)
-                    if next_para_start > start_pos and next_para_start < end_pos:
-                        start_pos = next_para_start + 2  # Skip the \n\n
-                        chunk_text = text[start_pos:end_pos]
-                        print(f"🔄 Adjusted chunk {chunk_idx + 1} start to char {start_pos} (skipping already-processed content)")
+            # Get a safe chunk boundary (splits at paragraph boundaries)
+            end_pos, chunk_text = get_safe_chunk_boundary(text, current_pos, chunk_size, text_length)
+            
+            print(f"   Chunk size: {len(chunk_text)} chars (positions {current_pos}-{end_pos})")
+            
+            # Determine if this might be the last chunk
+            is_last_chunk = end_pos >= text_length
             
             user_prompt = f"""Extract the structure from this text block and convert it to the required JSON format.
 
 {"Title: " + title if title else ""}
 {"Author: " + author if author else ""}
 
-IMPORTANT: This is chunk {chunk_idx + 1} of {len(chunks)}. The text may be incomplete (it's a portion of a larger book).
+IMPORTANT: This is chunk {chunk_number} of a larger book. The text may be incomplete at the end.
 
 CRITICAL INSTRUCTIONS:
 1. Only process COMPLETE paragraphs. If the text ends mid-sentence or mid-paragraph, DO NOT include that incomplete fragment.
-2. Return the EXACT TEXT of the last complete paragraph you processed in "last_processed_paragraph" field so we know where you stopped. This is CRITICAL for continuity.
-3. If this chunk starts mid-chapter, the beginning may overlap with previous chunk - only process NEW content.
-4. Return all chapters and sections you can identify in this chunk.
+2. Return the EXACT TEXT of the last complete paragraph you processed in "last_processed_paragraph" field.
+3. If the text ends with incomplete text (you stopped early because content was cut off), set "stopped_early" to true.
+4. If "stopped_early" is true, provide "next_chunk_start_hint" with the first few words of what should come next.
+5. If this chunk starts mid-chapter, merge sections with the previous chunk's content if appropriate.
+6. Return all chapters and sections you can identify in this chunk.
+
+{"THIS IS THE LAST CHUNK - process everything to the end." if is_last_chunk else "This is NOT the last chunk - stop at the last complete paragraph."}
 
 Text:
 {chunk_text}"""
@@ -208,7 +231,7 @@ Text:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.1
+                    temperature=0.1  # Low temperature for consistent structure
                 )
                 
                 raw_response = response.choices[0].message.content
@@ -216,13 +239,39 @@ Text:
                 
                 # Extract last processed paragraph for rolling cursor
                 last_para = chunk_json.get("last_processed_paragraph", "")
+                stopped_early = chunk_json.get("stopped_early", False)
+                next_hint = chunk_json.get("next_chunk_start_hint", "")
+                
+                # Find where this paragraph ends in the original text
+                next_pos = end_pos  # Default: use pre-chunked boundary
+                
                 if last_para:
-                    last_processed_paragraph = last_para
-                    # Find where we actually stopped in the original text
-                    para_pos = chunk_text.rfind(last_para)
-                    if para_pos >= 0:
-                        actual_stop_pos = start_pos + para_pos + len(last_para)
-                        print(f"✅ Processed up to char {actual_stop_pos} (last paragraph: {last_para[:60]}...)")
+                    print(f"   ✅ Last processed paragraph (first 80 chars): {last_para[:80]}...")
+                    
+                    # Find the paragraph in the original text to get exact position
+                    para_end_pos = find_paragraph_position(text, last_para, current_pos)
+                    
+                    if para_end_pos > current_pos:
+                        # Found it! Start next chunk after this paragraph
+                        # Look for the start of the next paragraph
+                        next_para_start = text.find('\n\n', para_end_pos, para_end_pos + 200)
+                        if next_para_start > para_end_pos:
+                            next_pos = next_para_start + 2  # Skip the \n\n
+                        else:
+                            next_pos = para_end_pos
+                        
+                        print(f"   ✅ Found paragraph end at char {para_end_pos}, next chunk starts at char {next_pos}")
+                    else:
+                        print(f"   ⚠️ Could not find exact paragraph position, using chunk boundary")
+                else:
+                    print(f"   ⚠️ No last_processed_paragraph returned, using chunk boundary")
+                
+                if stopped_early:
+                    print(f"   ⚠️ LLM stopped early - last part of chunk was out of context")
+                    if next_hint:
+                        print(f"   💡 Next chunk hint: {next_hint[:80]}...")
+                else:
+                    print(f"   ✅ LLM processed complete chunk")
                 
                 # Extract chapters from this chunk
                 if "document" in chunk_json:
@@ -237,23 +286,42 @@ Text:
                                 # Merge sections - append new sections to existing chapter
                                 new_sections = chapter.get("sections", [])
                                 accumulated_chapters[chapter_title]["sections"].extend(new_sections)
-                                print(f"  📝 Merged sections into existing chapter: {chapter_title}")
+                                print(f"   📝 Merged {len(new_sections)} sections into existing chapter: {chapter_title}")
                             else:
                                 # New chapter
                                 accumulated_chapters[chapter_title] = chapter
-                                print(f"  ➕ New chapter: {chapter_title}")
+                                print(f"   ➕ New chapter: {chapter_title} ({len(chapter.get('sections', []))} sections)")
                     
-                    print(f"✅ Chunk {chunk_idx + 1} processed: found {len(chunk_doc.get('chapters', []))} chapters")
+                    chunk_chapter_count = len(chunk_doc.get('chapters', []))
+                    print(f"   ✅ Chunk {chunk_number} processed: found {chunk_chapter_count} chapters")
                 
+                # Move to next chunk position (true rolling cursor)
+                previous_pos = current_pos
+                current_pos = next_pos
+                
+                # Safety check: ensure we're making progress
+                if current_pos <= previous_pos:
+                    print(f"   ❌ Error: cursor didn't advance ({previous_pos} -> {current_pos}). Breaking to avoid infinite loop.")
+                    current_pos = end_pos  # Force advance
+                    if current_pos >= text_length:
+                        break
+                    
+            except json.JSONDecodeError as e:
+                print(f"   ❌ JSON decode error: {str(e)}")
+                print(f"   ❌ Raw response: {raw_response[:500] if 'raw_response' in locals() else 'N/A'}")
+                # Move forward anyway to avoid getting stuck
+                current_pos = end_pos
+                continue
             except Exception as e:
-                print(f"❌ Error processing chunk {chunk_idx + 1}: {str(e)}")
+                print(f"   ❌ Error processing chunk {chunk_number}: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                # Continue with next chunk instead of failing completely
+                # Move forward anyway to avoid getting stuck
+                current_pos = end_pos
                 continue
         
         # Convert accumulated chapters to list
-        all_chapters = list(accumulated_chapters.values())
+        all_chapters = [ch for ch in accumulated_chapters.values() if ch != {}]
         
         # Return merged structure
         structured_json = {
@@ -263,11 +331,17 @@ Text:
                 "chapters": all_chapters
             }
         }
-        print(f"✅ Structure extracted successfully: {len(all_chapters)} total chapters from {len(chunks)} chunks")
+        print(f"\n✅ Structure extracted successfully: {len(all_chapters)} total chapters from {chunk_number} chunks")
         return structured_json
     
     # Short book - process directly
-    processed_text = text
+    user_prompt = f"""Extract the structure from this text and convert it to the required JSON format.
+
+{"Title: " + title if title else ""}
+{"Author: " + author if author else ""}
+
+Text ({len(text)} characters):
+{text}"""
 
     try:
         print(f"🔍 Calling GPT-4o-mini for structure extraction (text length: {len(text)} chars)...")
