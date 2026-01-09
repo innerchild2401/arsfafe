@@ -320,8 +320,8 @@ Text:
                 current_pos = end_pos
                 continue
         
-        # Convert accumulated chapters to list
-        all_chapters = [ch for ch in accumulated_chapters.values() if ch != {}]
+        # Convert accumulated chapters to list (filter out any empty/invalid chapters)
+        all_chapters = [ch for ch in accumulated_chapters.values() if isinstance(ch, dict) and ch.get("sections")]
         
         # Return merged structure
         structured_json = {
