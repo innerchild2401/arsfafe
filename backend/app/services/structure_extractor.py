@@ -160,11 +160,29 @@ The top-level key MUST be "document". Include "last_processed_paragraph" and "pr
         print(f"✅ Pre-chunked into {len(chunks)} blocks")
         
         # Step 2: Process each chunk sequentially with rolling cursor
-        all_chapters = []
-        accumulated_chapters = {}  # Track chapters across chunks
+        accumulated_chapters = {}  # Track chapters across chunks (keyed by chapter title)
+        last_processed_paragraph = ""  # Track last paragraph for rolling cursor
         
         for chunk_idx, (start_pos, end_pos, chunk_text) in enumerate(chunks):
             print(f"📖 Processing chunk {chunk_idx + 1}/{len(chunks)} (chars {start_pos}-{end_pos}, {len(chunk_text)} chars)...")
+            
+            # If we have a last processed paragraph from previous chunk, find where to start
+            if last_processed_paragraph and chunk_idx > 0:
+                # Find the last processed paragraph in the current chunk's overlap area
+                # The overlap ensures we have context, but we should skip already-processed content
+                para_end_marker = last_processed_paragraph[-100:]  # Use last 100 chars for matching
+                overlap_start = max(0, start_pos - overlap)
+                overlap_text = text[overlap_start:start_pos + min(overlap, len(chunk_text))]
+                
+                # Try to find where this chunk should actually start (after last processed paragraph)
+                para_end_pos = overlap_text.rfind(para_end_marker)
+                if para_end_pos >= 0:
+                    # Found the end of last paragraph in overlap, skip to next paragraph
+                    next_para_start = text.find('\n\n', overlap_start + para_end_pos + len(para_end_marker), end_pos)
+                    if next_para_start > start_pos and next_para_start < end_pos:
+                        start_pos = next_para_start + 2  # Skip the \n\n
+                        chunk_text = text[start_pos:end_pos]
+                        print(f"🔄 Adjusted chunk {chunk_idx + 1} start to char {start_pos} (skipping already-processed content)")
             
             user_prompt = f"""Extract the structure from this text block and convert it to the required JSON format.
 
@@ -175,8 +193,8 @@ IMPORTANT: This is chunk {chunk_idx + 1} of {len(chunks)}. The text may be incom
 
 CRITICAL INSTRUCTIONS:
 1. Only process COMPLETE paragraphs. If the text ends mid-sentence or mid-paragraph, DO NOT include that incomplete fragment.
-2. Return the last complete paragraph you processed in "last_processed_paragraph" so we know where you stopped.
-3. If this chunk starts mid-chapter, merge sections with the previous chunk's content if appropriate.
+2. Return the EXACT TEXT of the last complete paragraph you processed in "last_processed_paragraph" field so we know where you stopped. This is CRITICAL for continuity.
+3. If this chunk starts mid-chapter, the beginning may overlap with previous chunk - only process NEW content.
 4. Return all chapters and sections you can identify in this chunk.
 
 Text:
@@ -197,15 +215,14 @@ Text:
                 chunk_json = json.loads(raw_response)
                 
                 # Extract last processed paragraph for rolling cursor
-                last_paragraph = chunk_json.get("last_processed_paragraph", "")
-                
-                # Find where we actually stopped in the original text
-                if last_paragraph and chunk_idx + 1 < len(chunks):
-                    # Find this paragraph in the chunk text
-                    para_pos = chunk_text.rfind(last_paragraph)
+                last_para = chunk_json.get("last_processed_paragraph", "")
+                if last_para:
+                    last_processed_paragraph = last_para
+                    # Find where we actually stopped in the original text
+                    para_pos = chunk_text.rfind(last_para)
                     if para_pos >= 0:
-                        actual_stop_pos = start_pos + para_pos + len(last_paragraph)
-                        print(f"✅ Processed up to char {actual_stop_pos} (last paragraph: {last_paragraph[:50]}...)")
+                        actual_stop_pos = start_pos + para_pos + len(last_para)
+                        print(f"✅ Processed up to char {actual_stop_pos} (last paragraph: {last_para[:60]}...)")
                 
                 # Extract chapters from this chunk
                 if "document" in chunk_json:
@@ -217,13 +234,14 @@ Text:
                             
                             # Check if this chapter already exists (continuing from previous chunk)
                             if chapter_title in accumulated_chapters:
-                                # Merge sections
-                                existing_sections = accumulated_chapters[chapter_title].get("sections", [])
+                                # Merge sections - append new sections to existing chapter
                                 new_sections = chapter.get("sections", [])
                                 accumulated_chapters[chapter_title]["sections"].extend(new_sections)
+                                print(f"  📝 Merged sections into existing chapter: {chapter_title}")
                             else:
                                 # New chapter
                                 accumulated_chapters[chapter_title] = chapter
+                                print(f"  ➕ New chapter: {chapter_title}")
                     
                     print(f"✅ Chunk {chunk_idx + 1} processed: found {len(chunk_doc.get('chapters', []))} chapters")
                 
