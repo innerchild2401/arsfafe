@@ -4,6 +4,17 @@ import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { 
+  BookOpen, 
+  MessageSquare, 
+  Upload, 
+  Brain, 
+  Shield,
+  LogOut,
+  Zap
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -35,15 +46,15 @@ export default function AppShell({ children }: AppShellProps) {
   }, [supabase])
 
   const navItems = [
-    { icon: '📚', label: 'Library', path: '/dashboard', id: 'library' },
-    { icon: '⚡', label: 'Quantum Chat', path: '/dashboard/knowledge-center', id: 'chat' },
-    { icon: '📤', label: 'Import', path: '/dashboard/upload', id: 'upload' },
-    { icon: '🧠', label: 'Memory', path: '/dashboard/books', id: 'memory' },
+    { icon: BookOpen, label: 'Library', path: '/dashboard', id: 'library' },
+    { icon: MessageSquare, label: 'Quantum Chat', path: '/dashboard/knowledge-center', id: 'chat' },
+    { icon: Upload, label: 'Import', path: '/dashboard/upload', id: 'upload' },
+    { icon: Brain, label: 'Memory', path: '/dashboard/books', id: 'memory' },
   ]
 
   // Add admin item if user is admin
   if (isAdmin) {
-    navItems.push({ icon: '🛡️', label: 'Control', path: '/admin', id: 'admin' })
+    navItems.push({ icon: Shield, label: 'Control', path: '/admin', id: 'admin' })
   }
 
   const isActive = (path: string) => {
@@ -54,48 +65,44 @@ export default function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-50 overflow-hidden">
+    <div className="flex h-screen bg-background overflow-hidden">
       {/* Rail Navigation */}
       <aside
-        className={`
-          fixed md:relative h-full z-50
-          bg-zinc-900 border-r border-zinc-800
-          transition-all duration-300 ease-in-out
-          ${sidebarExpanded ? 'w-64' : 'w-16'}
-          flex flex-col
-        `}
+        className={cn(
+          "fixed md:relative h-full z-50 bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col",
+          sidebarExpanded ? 'w-64' : 'w-16'
+        )}
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
       >
         {/* Logo/Brand */}
-        <div className="h-16 flex items-center justify-center border-b border-zinc-800">
+        <div className="h-16 flex items-center justify-center border-b border-border">
           {sidebarExpanded ? (
             <span className="font-mono text-sm font-semibold text-emerald-400">ARSFAFE</span>
           ) : (
-            <span className="text-xl">⚡</span>
+            <Zap className="w-6 h-6 text-emerald-400" />
           )}
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex-1 py-4 space-y-2">
+        <nav className="flex-1 py-4 space-y-1 px-2">
           {navItems.map((item) => {
             const active = isActive(item.path)
+            const Icon = item.icon
             return (
               <Link
                 key={item.id}
                 href={item.path}
-                className={`
-                  flex items-center gap-3 px-4 py-3 mx-2 rounded-lg
-                  transition-colors duration-200
-                  ${active
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                  }
-                `}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-200 text-sm",
+                  active
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                )}
               >
-                <span className="text-xl flex-shrink-0">{item.icon}</span>
+                <Icon className="w-5 h-5 flex-shrink-0" />
                 {sidebarExpanded && (
-                  <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
+                  <span className="font-medium whitespace-nowrap">{item.label}</span>
                 )}
               </Link>
             )
@@ -103,17 +110,18 @@ export default function AppShell({ children }: AppShellProps) {
         </nav>
 
         {/* User Menu (Bottom) */}
-        <div className="border-t border-zinc-800 p-4">
-          <button
+        <div className="border-t border-border p-2">
+          <Button
+            variant="ghost"
+            className="w-full justify-start"
             onClick={async () => {
               await supabase.auth.signOut()
               router.push('/login')
             }}
-            className="flex items-center gap-3 w-full px-4 py-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 rounded-lg transition-colors"
           >
-            <span className="text-xl">🚪</span>
-            {sidebarExpanded && <span className="text-sm">Sign Out</span>}
-          </button>
+            <LogOut className="w-5 h-5 flex-shrink-0" />
+            {sidebarExpanded && <span className="ml-3">Sign Out</span>}
+          </Button>
         </div>
       </aside>
 

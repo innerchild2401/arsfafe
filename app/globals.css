@@ -2,34 +2,43 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600&display=swap');
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --radius: 0.5rem;
+  }
 }
 
-:root {
-  font-size: 16px;
-}
-
-html {
-  -webkit-text-size-adjust: 100%;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-  height: 100%;
-}
-
-body {
-  color: rgb(250, 250, 250);
-  background: rgb(9, 9, 11); /* zinc-950 */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  line-height: 1.5;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
 }
 
 /* Typography */
@@ -41,72 +50,25 @@ body {
   font-family: 'Source Serif 4', Georgia, serif;
 }
 
-/* Touch targets - minimum 44x44px for mobile */
-button,
-a,
-input[type="submit"],
-input[type="button"] {
-  min-height: 44px;
-  min-width: 44px;
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-/* Prevent text selection on buttons */
-button {
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
+::-webkit-scrollbar-track {
+  @apply bg-zinc-900;
 }
 
-/* Underlined Input Style */
-.underlined-input {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgb(63, 63, 70); /* zinc-700 */
-  border-radius: 0;
-  color: rgb(250, 250, 250);
-  padding: 0.5rem 0;
-  transition: border-color 0.2s;
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-700 rounded;
 }
 
-.underlined-input:focus {
-  outline: none;
-  border-bottom-color: rgb(16, 185, 129); /* emerald-500 */
-  box-shadow: 0 1px 0 0 rgb(16, 185, 129);
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-zinc-600;
 }
 
-.underlined-input::placeholder {
-  color: rgb(113, 113, 122); /* zinc-500 */
-}
-
-/* Signal Color Badges - Outline Only */
-.badge-emerald {
-  border: 1px solid rgba(16, 185, 129, 0.5);
-  color: rgb(52, 211, 153); /* emerald-400 */
-  background: transparent;
-  box-shadow: 0 0 5px rgba(16, 185, 129, 0.3);
-}
-
-.badge-amber {
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  color: rgb(251, 191, 36); /* amber-400 */
-  background: transparent;
-  box-shadow: 0 0 5px rgba(245, 158, 11, 0.3);
-}
-
-.badge-rose {
-  border: 1px solid rgba(244, 63, 94, 0.5);
-  color: rgb(251, 113, 133); /* rose-400 */
-  background: transparent;
-  box-shadow: 0 0 5px rgba(244, 63, 94, 0.3);
-}
-
-.badge-violet {
-  border: 1px solid rgba(139, 92, 246, 0.5);
-  color: rgb(167, 139, 250); /* violet-400 */
-  background: transparent;
-  box-shadow: 0 0 5px rgba(139, 92, 246, 0.3);
-}
-
-/* Shimmer Effect for Loading */
+/* Shimmer Effect */
 @keyframes shimmer {
   0% {
     background-position: -1000px 0;
@@ -128,7 +90,7 @@ button {
   background-size: 1000px 100%;
 }
 
-/* Zorxido Orb Pulse Animation */
+/* Zorxido Orb Pulse */
 @keyframes pulse-orb {
   0%, 100% {
     opacity: 1;
@@ -146,52 +108,4 @@ button {
 
 .zorxido-orb-active {
   animation: pulse-orb 0.8s ease-in-out infinite;
-}
-
-/* Radar/Scan Animation */
-@keyframes radar-scan {
-  0% {
-    transform: scale(0.8);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(2);
-    opacity: 0;
-  }
-}
-
-.radar-scan {
-  position: relative;
-}
-
-.radar-scan::before,
-.radar-scan::after {
-  content: '';
-  position: absolute;
-  border: 2px solid rgb(16, 185, 129);
-  border-radius: 50%;
-  animation: radar-scan 2s ease-out infinite;
-}
-
-.radar-scan::after {
-  animation-delay: 1s;
-}
-
-/* Scrollbar Styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgb(24, 24, 27); /* zinc-900 */
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgb(63, 63, 70); /* zinc-700 */
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(82, 82, 91); /* zinc-600 */
 }
