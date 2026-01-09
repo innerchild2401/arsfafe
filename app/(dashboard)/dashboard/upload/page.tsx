@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getBackendUrl } from '@/lib/api'
@@ -12,6 +12,13 @@ interface TerminalLog {
   message: string
 }
 
+interface BackendLog {
+  id: string
+  log_message: string
+  log_level: 'info' | 'success' | 'error' | 'warning'
+  created_at: string
+}
+
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
@@ -21,13 +28,93 @@ export default function UploadPage() {
   const [success, setSuccess] = useState(false)
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([])
   const [showTerminal, setShowTerminal] = useState(false)
+  const [bookId, setBookId] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
   const addLog = (level: TerminalLog['level'], message: string) => {
-    setTerminalLogs(prev => [...prev, { timestamp: new Date(), level, message }])
+    setTerminalLogs(prev => {
+      const newLogs = [...prev, { timestamp: new Date(), level, message }]
+      // Keep only last 4 lines
+      return newLogs.slice(-4)
+    })
     setShowTerminal(true)
   }
+
+  // Poll for logs when book is processing
+  useEffect(() => {
+    if (bookId && isProcessing) {
+      const pollLogs = async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session) return
+
+          const backendUrl = getBackendUrl()
+          const response = await fetch(`${backendUrl}/api/books/${bookId}/logs?limit=10`, {
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            const logs: BackendLog[] = data.logs || []
+            
+            // Convert backend logs to terminal logs and keep only last 4
+            const convertedLogs: TerminalLog[] = logs.slice(-4).map(log => ({
+              timestamp: new Date(log.created_at),
+              level: log.log_level,
+              message: log.log_message
+            }))
+
+            if (convertedLogs.length > 0) {
+              setTerminalLogs(convertedLogs)
+            }
+
+            // Check if processing is complete (status: ready or error)
+            const statusResponse = await fetch(`${backendUrl}/api/books/${bookId}`, {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`
+              }
+            })
+
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json()
+              const bookStatus = statusData.book?.status
+
+              if (bookStatus === 'ready') {
+                setIsProcessing(false)
+                addLog('success', 'Processing completed successfully!')
+              } else if (bookStatus === 'error') {
+                setIsProcessing(false)
+                addLog('error', 'Processing failed. Check book details for error message.')
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error polling logs:', error)
+        }
+      }
+
+      // Poll immediately, then every 2 seconds
+      pollLogs()
+      pollingIntervalRef.current = setInterval(pollLogs, 2000)
+    } else {
+      // Stop polling
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [bookId, isProcessing, supabase])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -102,16 +189,18 @@ export default function UploadPage() {
         throw new Error(errorData.detail || `Upload failed: ${response.statusText}`)
       }
 
+      const uploadData = await response.json()
+      const uploadedBookId = uploadData.book_id
+
+      if (uploadedBookId) {
+        setBookId(uploadedBookId)
+        setIsProcessing(true)
+      }
+
       addLog('success', 'Upload successful!')
-      addLog('info', 'Processing started in background...')
-      addLog('info', 'You can close this terminal. Check your library for status updates.')
+      addLog('info', 'Processing started...')
 
       setSuccess(true)
-      
-      setTimeout(() => {
-        router.push('/dashboard')
-        router.refresh()
-      }, 3000)
       
     } catch (error: any) {
       addLog('error', `Upload failed: ${error.message}`)

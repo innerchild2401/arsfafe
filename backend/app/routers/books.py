@@ -21,6 +21,7 @@ from app.services.structure_extractor import extract_structure
 from app.services.embedding_service import generate_embeddings_batch
 from app.services.topic_labeler import generate_topic_labels
 from app.services.storage_service import upload_file_to_storage
+from app.services.log_service import log_info, log_success, log_error, log_warning
 
 router = APIRouter()
 
@@ -429,6 +430,7 @@ def process_book(
     4. Store in database
     """
     try:
+        log_info(book_id, f"Starting processing ({len(extracted_text):,} characters)")
         print(f"🔄 Starting background processing for book {book_id}")
         print(f"📊 Extracted text length: {len(extracted_text)} characters")
         
@@ -439,24 +441,30 @@ def process_book(
         supabase.table("books").update({
             "status": "processing"
         }).eq("id", book_id).execute()
+        log_success(book_id, "Status updated to processing")
         print(f"✅ Updated book status to 'processing'")
         
         # Step 1: Extract structure
+        log_info(book_id, "Extracting structure with GPT-4o-mini...")
         print(f"🔍 Step 1: Extracting structure using GPT-4o-mini...")
-        structured_json = extract_structure(extracted_text, title, author)
+        structured_json = extract_structure(extracted_text, title, author, book_id)
+        log_success(book_id, "Structure extraction completed")
         print(f"✅ Structure extracted successfully")
         
         # Step 2: Create chunks and generate embeddings
+        log_info(book_id, "Creating chunks and generating embeddings...")
         print(f"📦 Step 2: Creating chunks...")
         parent_chunks = []
         child_chunks = []
         
         num_chapters = len(structured_json["document"]["chapters"])
+        log_info(book_id, f"Found {num_chapters} chapters")
         print(f"📚 Found {num_chapters} chapters")
         
         for chapter_idx, chapter in enumerate(structured_json["document"]["chapters"]):
-            print(f"📖 Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter.get('chapter_title', 'Untitled')}")
             chapter_title = chapter.get("chapter_title", "Untitled Chapter")
+            log_info(book_id, f"Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter_title[:50]}")
+            print(f"📖 Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter_title}")
             
             for section in chapter.get("sections", []):
                 section_title = section.get("section_title") or ""  # Handle None case
@@ -471,8 +479,10 @@ def process_book(
                 
                 # Generate topic labels
                 section_display = section_title[:50] if section_title else "(Untitled Section)"
+                log_info(book_id, f"Labeling section: {section_display}")
                 print(f"🏷️  Generating topic labels for section: {section_display}...")
                 topic_labels = generate_topic_labels(parent_text)
+                log_success(book_id, f"Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 print(f"✅ Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 
                 # Insert parent chunk
@@ -493,11 +503,14 @@ def process_book(
                 
                 if child_texts:
                     # Generate embeddings in batch
+                    log_info(book_id, f"Generating embeddings for {len(child_texts)} chunks...")
                     print(f"🧮 Generating embeddings for {len(child_texts)} child chunks...")
                     embeddings = generate_embeddings_batch(child_texts)
+                    log_success(book_id, f"Generated {len(embeddings)} embeddings")
                     print(f"✅ Generated {len(embeddings)} embeddings")
                     
                     # Insert child chunks
+                    log_info(book_id, f"Inserting {len(child_texts)} chunks into database...")
                     print(f"💾 Inserting {len(child_texts)} child chunks into database...")
                     for idx, (text, embedding) in enumerate(zip(child_texts, embeddings)):
                         child_data = {
@@ -520,6 +533,7 @@ def process_book(
             "processed_at": datetime.utcnow().isoformat()
         }).eq("id", book_id).execute()
         
+        log_success(book_id, f"Processing completed: {total_chunks} chunks created")
         print(f"Book {book_id} processed successfully: {total_chunks} chunks created")
         
     except Exception as e:
@@ -529,6 +543,7 @@ def process_book(
         error_message = str(e)
         error_traceback = traceback.format_exc()
         
+        log_error(book_id, f"Processing failed: {error_message}")
         print(f"❌ ERROR processing book {book_id}: {error_message}")
         print(f"❌ Traceback:\n{error_traceback}")
         
@@ -780,3 +795,37 @@ async def restore_book(
         raise HTTPException(status_code=404, detail="Book not found or access denied")
     
     return {"message": "Book restored"}
+
+@router.get("/{book_id}/logs")
+async def get_book_logs(
+    book_id: str,
+    current_user: dict = Depends(get_current_user),
+    limit: int = 50
+):
+    """
+    Get processing logs for a book (latest N logs)
+    
+    Query params:
+    - limit: Number of logs to return (default: 50, max: 200)
+    """
+    supabase = get_supabase_client()
+    user_id = current_user["id"]
+    
+    # Check if user has access
+    access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).eq("is_visible", True).execute()
+    
+    if not access_check.data and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Limit max logs
+    limit = min(limit, 200)
+    
+    # Get logs (most recent first)
+    result = supabase.table("processing_logs").select(
+        "id, log_message, log_level, created_at"
+    ).eq("book_id", book_id).order("created_at", desc=True).limit(limit).execute()
+    
+    # Reverse to show oldest first (for UI)
+    logs = list(reversed(result.data or []))
+    
+    return {"logs": logs, "count": len(logs)}

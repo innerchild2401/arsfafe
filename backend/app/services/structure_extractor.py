@@ -7,9 +7,20 @@ from openai import OpenAI
 from app.config import settings
 import json
 import re
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 client = OpenAI(api_key=settings.openai_api_key)
+
+# Optional: Import log service if book_id is provided
+try:
+    from app.services.log_service import log_info, log_success, log_error, log_warning
+    LOGGING_AVAILABLE = True
+except ImportError:
+    LOGGING_AVAILABLE = False
+    def log_info(*args, **kwargs): pass
+    def log_success(*args, **kwargs): pass
+    def log_error(*args, **kwargs): pass
+    def log_warning(*args, **kwargs): pass
 
 # JSON Schema for document structure
 DOCUMENT_SCHEMA = {
@@ -181,7 +192,7 @@ def find_paragraph_position(text: str, paragraph: str, search_start: int = 0) ->
     
     return -1
 
-def extract_structure(text: str, title: str = None, author: str = None) -> Dict[str, Any]:
+def extract_structure(text: str, title: str = None, author: str = None, book_id: str = None) -> Dict[str, Any]:
     """
     Extract hierarchical structure from text using GPT-4o-mini
     Uses true rolling chunk processing: each chunk starts where the previous one ended.
@@ -242,7 +253,10 @@ The top-level key MUST be "document". Include "last_processed_paragraph", "stopp
     
     if text_length > chunk_size:
         # Use true rolling chunk processing for long books
-        print(f"📚 Book is long ({text_length} chars). Processing with rolling cursor (40K chunks)...")
+        message = f"Book is long ({text_length:,} chars). Processing with rolling cursor (40K chunks)..."
+        print(f"📚 {message}")
+        if book_id and LOGGING_AVAILABLE:
+            log_info(book_id, message)
         
         accumulated_chapters = {}  # Track chapters across chunks (keyed by chapter title)
         current_pos = 0  # True rolling cursor - start at beginning
@@ -250,7 +264,10 @@ The top-level key MUST be "document". Include "last_processed_paragraph", "stopp
         
         while current_pos < text_length:
             chunk_number += 1
-            print(f"\n📖 Processing chunk {chunk_number} starting at char {current_pos}...")
+            message = f"Processing chunk {chunk_number} (position {current_pos:,})"
+            print(f"\n📖 {message}...")
+            if book_id and LOGGING_AVAILABLE:
+                log_info(book_id, message)
             
             # Get a safe chunk boundary (splits at paragraph boundaries)
             end_pos, chunk_text = get_safe_chunk_boundary(text, current_pos, chunk_size, text_length)
@@ -280,20 +297,30 @@ CRITICAL INSTRUCTIONS:
 Text:
 {chunk_text}"""
             
-            try:
-                max_retries = 2
+                try:
+                max_retries = 3
                 retry_count = 0
                 chunk_json = None
                 raw_response = None
+                current_chunk_text = chunk_text  # Track chunk text across retries
+                current_chunk_size = chunk_size  # Track effective chunk size
+                min_chunk_size = 10000  # Minimum chunk size (10K chars) to avoid infinite reduction
                 
                 while retry_count <= max_retries:
                     try:
+                        # Ensure we're making progress - don't reduce below minimum
+                        if len(current_chunk_text) < min_chunk_size and retry_count > 0:
+                            print(f"   ⚠️ Chunk size reduced to minimum ({len(current_chunk_text)} chars). Skipping chunk and advancing.")
+                            # Force advance by at least 10K characters to avoid infinite loop
+                            current_pos = min(current_pos + min_chunk_size, text_length)
+                            break  # Exit retry loop, will move to next chunk
+                        
                         response = client.chat.completions.create(
                             model=settings.structure_model,
                             response_format={"type": "json_object"},
                             messages=[
                                 {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
+                                {"role": "user", "content": user_prompt.replace(chunk_text, current_chunk_text)}
                             ],
                             temperature=0.1  # Low temperature for consistent structure
                         )
@@ -305,27 +332,63 @@ Text:
                             chunk_json = json.loads(raw_response)
                             break  # Success!
                         except json.JSONDecodeError as json_err:
-                            print(f"   ⚠️ JSON decode error (attempt {retry_count + 1}/{max_retries + 1}): {str(json_err)}")
+                            error_msg = f"JSON decode error (attempt {retry_count + 1}/{max_retries + 1}): {str(json_err)}"
+                            print(f"   ⚠️ {error_msg}")
+                            if book_id and LOGGING_AVAILABLE:
+                                log_warning(book_id, error_msg)
                             
-                            # Try to repair truncated JSON
+                            # Try to repair truncated JSON on first attempt only
                             if retry_count == 0:
-                                print(f"   🔧 Attempting to repair truncated JSON...")
+                                repair_msg = "Attempting to repair truncated JSON..."
+                                print(f"   🔧 {repair_msg}")
+                                if book_id and LOGGING_AVAILABLE:
+                                    log_info(book_id, repair_msg)
                                 repaired_json = repair_truncated_json(raw_response)
                                 try:
                                     chunk_json = json.loads(repaired_json)
-                                    print(f"   ✅ Successfully repaired JSON")
+                                    success_msg = "Successfully repaired JSON"
+                                    print(f"   ✅ {success_msg}")
+                                    if book_id and LOGGING_AVAILABLE:
+                                        log_success(book_id, success_msg)
                                     break
                                 except json.JSONDecodeError:
-                                    print(f"   ❌ Could not repair JSON, will retry with smaller chunk")
+                                    fail_msg = "Could not repair JSON, will retry with smaller chunk"
+                                    print(f"   ❌ {fail_msg}")
+                                    if book_id and LOGGING_AVAILABLE:
+                                        log_warning(book_id, fail_msg)
                             
-                            # If repair failed or we've already tried, retry with smaller chunk
+                            # If repair failed and we haven't exceeded retries, retry with smaller chunk
                             if retry_count < max_retries:
-                                # Reduce chunk size by 20% and try again
-                                print(f"   🔄 Retrying with smaller chunk (reducing by 20%)...")
-                                smaller_end_pos = current_pos + int(len(chunk_text) * 0.8)
-                                # Find safe boundary
-                                smaller_end_pos, chunk_text = get_safe_chunk_boundary(text, current_pos, int(chunk_size * 0.8), text_length)
-                                end_pos = smaller_end_pos
+                                # Reduce chunk size by 25% each retry
+                                reduction_factor = 0.75 ** retry_count  # 75%, 56.25%, 42.19%...
+                                new_target_size = int(current_chunk_size * reduction_factor)
+                                
+                                if new_target_size < min_chunk_size:
+                                    min_msg = f"Chunk size ({new_target_size}) below minimum ({min_chunk_size}). Using minimum."
+                                    print(f"   ⚠️ {min_msg}")
+                                    if book_id and LOGGING_AVAILABLE:
+                                        log_warning(book_id, min_msg)
+                                    new_target_size = min_chunk_size
+                                
+                                retry_msg = f"Retrying with smaller chunk (new size: {new_target_size:,} chars)..."
+                                print(f"   🔄 {retry_msg}")
+                                if book_id and LOGGING_AVAILABLE:
+                                    log_info(book_id, retry_msg)
+                                
+                                # Get new safe boundary with smaller size
+                                new_end_pos, current_chunk_text = get_safe_chunk_boundary(text, current_pos, new_target_size, text_length)
+                                
+                                # CRITICAL: Ensure we're making forward progress
+                                if new_end_pos <= current_pos:
+                                    print(f"   ❌ Error: new_end_pos ({new_end_pos}) <= current_pos ({current_pos}). Forcing advance.")
+                                    # Force advance by at least 5K to avoid infinite loop
+                                    current_pos = min(current_pos + 5000, text_length)
+                                    break  # Exit retry loop
+                                
+                                end_pos = new_end_pos
+                                is_last_chunk = end_pos >= text_length
+                                
+                                # Update user prompt with new chunk text
                                 user_prompt = f"""Extract the structure from this text block and convert it to the required JSON format.
 
 {"Title: " + title if title else ""}
@@ -345,26 +408,42 @@ CRITICAL INSTRUCTIONS:
 {"THIS IS THE LAST CHUNK - process everything to the end." if is_last_chunk else "This is NOT the last chunk - stop at the last complete paragraph."}
 
 Text:
-{chunk_text}"""
+{current_chunk_text}"""
                                 retry_count += 1
                                 continue
                             else:
-                                # Last attempt failed, log and raise
-                                print(f"   ❌ JSON decode failed after {max_retries + 1} attempts")
-                                print(f"   📄 Raw response (first 1000 chars): {raw_response[:1000]}")
-                                print(f"   📄 Raw response (last 500 chars): {raw_response[-500:]}")
-                                raise
+                                # Last attempt failed, log and skip this chunk
+                                fail_msg = f"JSON decode failed after {max_retries + 1} attempts. Skipping chunk and advancing."
+                                print(f"   ❌ {fail_msg}")
+                                if book_id and LOGGING_AVAILABLE:
+                                    log_error(book_id, fail_msg)
+                                print(f"   📄 Raw response length: {len(raw_response)} chars")
+                                print(f"   📄 Raw response (first 500 chars): {raw_response[:500]}")
+                                # Force advance to avoid getting stuck
+                                current_pos = min(end_pos, current_pos + min_chunk_size)
+                                break  # Exit retry loop, will continue to next chunk
                     
                     except Exception as api_err:
                         if retry_count < max_retries:
-                            print(f"   ⚠️ API error (attempt {retry_count + 1}): {str(api_err)}")
+                            print(f"   ⚠️ API error (attempt {retry_count + 1}/{max_retries + 1}): {str(api_err)}")
                             retry_count += 1
+                            # Reduce chunk size for next retry
+                            current_chunk_size = int(current_chunk_size * 0.75)
+                            current_chunk_text = text[current_pos:min(current_pos + current_chunk_size, text_length)]
                             continue
                         else:
-                            raise
+                            print(f"   ❌ API error after all retries: {str(api_err)}")
+                            # Force advance to avoid getting stuck
+                            current_pos = min(end_pos, current_pos + min_chunk_size)
+                            break  # Exit retry loop
                 
                 if chunk_json is None:
-                    raise Exception("Failed to get valid JSON response after retries")
+                    # If we couldn't process this chunk, advance and continue
+                    print(f"   ⚠️ Could not process chunk {chunk_number}. Advancing to next chunk.")
+                    current_pos = min(end_pos, current_pos + min_chunk_size)
+                    if current_pos >= text_length:
+                        break
+                    continue  # Skip to next chunk
                 
                 # Extract last processed paragraph for rolling cursor
                 last_para = chunk_json.get("last_processed_paragraph", "")
@@ -463,7 +542,10 @@ Text:
                 "chapters": all_chapters
             }
         }
-        print(f"\n✅ Structure extracted successfully: {len(all_chapters)} total chapters from {chunk_number} chunks")
+        success_msg = f"Structure extracted: {len(all_chapters)} chapters from {chunk_number} chunks"
+        print(f"\n✅ {success_msg}")
+        if book_id and LOGGING_AVAILABLE:
+            log_success(book_id, success_msg)
         return structured_json
     
     # Short book - process directly
