@@ -89,6 +89,63 @@ def get_safe_chunk_boundary(text: str, start_pos: int, target_size: int, text_le
     chunk_text = text[start_pos:end_pos]
     return (end_pos, chunk_text)
 
+def repair_truncated_json(json_str: str) -> str:
+    """
+    Attempt to repair truncated JSON by closing open strings, arrays, and objects.
+    
+    Args:
+        json_str: Potentially truncated JSON string
+    
+    Returns:
+        Repaired JSON string (may still be invalid)
+    """
+    if not json_str or not json_str.strip():
+        return json_str
+    
+    # Count open/close brackets and braces
+    open_braces = json_str.count('{')
+    close_braces = json_str.count('}')
+    open_brackets = json_str.count('[')
+    close_brackets = json_str.count(']')
+    
+    result = json_str
+    
+    # If we're in the middle of a string, try to close it
+    # Find the last unclosed quote (but not escaped)
+    in_string = False
+    escape_next = False
+    last_quote_pos = -1
+    
+    for i, char in enumerate(json_str):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\':
+            escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            if in_string:
+                last_quote_pos = i
+    
+    # If we're in a string, close it
+    if in_string:
+        # Find where the string likely ends (before next comma, bracket, or brace)
+        # Or just close it at the end
+        result = json_str + '"'
+    
+    # Close arrays
+    while open_brackets > close_brackets:
+        result += ']'
+        close_brackets += 1
+    
+    # Close objects
+    while open_braces > close_braces:
+        result += '}'
+        close_braces += 1
+    
+    return result
+
 def find_paragraph_position(text: str, paragraph: str, search_start: int = 0) -> int:
     """
     Find the end position of a paragraph in the original text.
@@ -224,18 +281,90 @@ Text:
 {chunk_text}"""
             
             try:
-                response = client.chat.completions.create(
-                    model=settings.structure_model,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.1  # Low temperature for consistent structure
-                )
+                max_retries = 2
+                retry_count = 0
+                chunk_json = None
+                raw_response = None
                 
-                raw_response = response.choices[0].message.content
-                chunk_json = json.loads(raw_response)
+                while retry_count <= max_retries:
+                    try:
+                        response = client.chat.completions.create(
+                            model=settings.structure_model,
+                            response_format={"type": "json_object"},
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.1  # Low temperature for consistent structure
+                        )
+                        
+                        raw_response = response.choices[0].message.content
+                        
+                        # Try to parse JSON
+                        try:
+                            chunk_json = json.loads(raw_response)
+                            break  # Success!
+                        except json.JSONDecodeError as json_err:
+                            print(f"   ⚠️ JSON decode error (attempt {retry_count + 1}/{max_retries + 1}): {str(json_err)}")
+                            
+                            # Try to repair truncated JSON
+                            if retry_count == 0:
+                                print(f"   🔧 Attempting to repair truncated JSON...")
+                                repaired_json = repair_truncated_json(raw_response)
+                                try:
+                                    chunk_json = json.loads(repaired_json)
+                                    print(f"   ✅ Successfully repaired JSON")
+                                    break
+                                except json.JSONDecodeError:
+                                    print(f"   ❌ Could not repair JSON, will retry with smaller chunk")
+                            
+                            # If repair failed or we've already tried, retry with smaller chunk
+                            if retry_count < max_retries:
+                                # Reduce chunk size by 20% and try again
+                                print(f"   🔄 Retrying with smaller chunk (reducing by 20%)...")
+                                smaller_end_pos = current_pos + int(len(chunk_text) * 0.8)
+                                # Find safe boundary
+                                smaller_end_pos, chunk_text = get_safe_chunk_boundary(text, current_pos, int(chunk_size * 0.8), text_length)
+                                end_pos = smaller_end_pos
+                                user_prompt = f"""Extract the structure from this text block and convert it to the required JSON format.
+
+{"Title: " + title if title else ""}
+{"Author: " + author if author else ""}
+
+IMPORTANT: This is chunk {chunk_number} of a larger book. The text may be incomplete at the end.
+
+CRITICAL INSTRUCTIONS:
+1. Only process COMPLETE paragraphs. If the text ends mid-sentence or mid-paragraph, DO NOT include that incomplete fragment.
+2. Return the EXACT TEXT of the last complete paragraph you processed in "last_processed_paragraph" field.
+3. If the text ends with incomplete text (you stopped early because content was cut off), set "stopped_early" to true.
+4. If "stopped_early" is true, provide "next_chunk_start_hint" with the first few words of what should come next.
+5. If this chunk starts mid-chapter, merge sections with the previous chunk's content if appropriate.
+6. Return all chapters and sections you can identify in this chunk.
+7. CRITICAL: Ensure your JSON response is complete and valid. Do not truncate strings mid-word.
+
+{"THIS IS THE LAST CHUNK - process everything to the end." if is_last_chunk else "This is NOT the last chunk - stop at the last complete paragraph."}
+
+Text:
+{chunk_text}"""
+                                retry_count += 1
+                                continue
+                            else:
+                                # Last attempt failed, log and raise
+                                print(f"   ❌ JSON decode failed after {max_retries + 1} attempts")
+                                print(f"   📄 Raw response (first 1000 chars): {raw_response[:1000]}")
+                                print(f"   📄 Raw response (last 500 chars): {raw_response[-500:]}")
+                                raise
+                    
+                    except Exception as api_err:
+                        if retry_count < max_retries:
+                            print(f"   ⚠️ API error (attempt {retry_count + 1}): {str(api_err)}")
+                            retry_count += 1
+                            continue
+                        else:
+                            raise
+                
+                if chunk_json is None:
+                    raise Exception("Failed to get valid JSON response after retries")
                 
                 # Extract last processed paragraph for rolling cursor
                 last_para = chunk_json.get("last_processed_paragraph", "")
@@ -307,8 +436,11 @@ Text:
                         break
                     
             except json.JSONDecodeError as e:
-                print(f"   ❌ JSON decode error: {str(e)}")
-                print(f"   ❌ Raw response: {raw_response[:500] if 'raw_response' in locals() else 'N/A'}")
+                print(f"   ❌ JSON decode error after all retries: {str(e)}")
+                if raw_response:
+                    print(f"   📄 Raw response length: {len(raw_response)} chars")
+                    print(f"   📄 Raw response (first 1000 chars): {raw_response[:1000]}")
+                    print(f"   📄 Raw response (last 500 chars): {raw_response[-500:]}")
                 # Move forward anyway to avoid getting stuck
                 current_pos = end_pos
                 continue

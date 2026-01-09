@@ -459,14 +459,19 @@ def process_book(
             chapter_title = chapter.get("chapter_title", "Untitled Chapter")
             
             for section in chapter.get("sections", []):
-                section_title = section.get("section_title", "")
+                section_title = section.get("section_title") or ""  # Handle None case
                 paragraphs = section.get("paragraphs", [])
+                
+                # Skip sections with no paragraphs
+                if not paragraphs or not any(p.strip() for p in paragraphs):
+                    continue
                 
                 # Create parent chunk (full section)
                 parent_text = "\n\n".join(paragraphs)
                 
                 # Generate topic labels
-                print(f"🏷️  Generating topic labels for section: {section_title[:50]}...")
+                section_display = section_title[:50] if section_title else "(Untitled Section)"
+                print(f"🏷️  Generating topic labels for section: {section_display}...")
                 topic_labels = generate_topic_labels(parent_text)
                 print(f"✅ Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 
