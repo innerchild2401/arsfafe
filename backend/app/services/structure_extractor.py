@@ -297,7 +297,7 @@ CRITICAL INSTRUCTIONS:
 Text:
 {chunk_text}"""
             
-                try:
+            try:
                 max_retries = 3
                 retry_count = 0
                 chunk_json = None
