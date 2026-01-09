@@ -38,23 +38,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4 py-6 sm:py-8">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4 py-6">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Welcome back</h1>
-          <p className="text-sm sm:text-base text-gray-600">Sign in to your account</p>
+          <h1 className="text-2xl font-semibold text-zinc-50 mb-2">Welcome back</h1>
+          <p className="text-sm text-zinc-400">Sign in to your account</p>
         </div>
         
         <form className="space-y-6" onSubmit={handleLogin}>
           {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 sm:p-4">
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
+              <p className="text-sm text-rose-400">{error}</p>
             </div>
           )}
           
-          <div className="space-y-4 sm:space-y-5">
+          <div className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-medium text-zinc-300 mb-2">
                 Email address
               </label>
               <input
@@ -65,12 +65,12 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                className="underlined-input w-full text-zinc-50"
                 placeholder="you@example.com"
               />
             </div>
             <div>
-              <label htmlFor="password" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-zinc-300 mb-2">
                 Password
               </label>
               <input
@@ -81,7 +81,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                className="underlined-input w-full text-zinc-50"
                 placeholder="••••••••"
               />
             </div>
@@ -90,13 +90,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 sm:px-6 sm:py-3 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base transition-colors"
+            className="w-full px-6 py-2.5 bg-zinc-100 text-zinc-900 rounded-lg hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors"
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
 
-          <div className="text-center text-sm sm:text-base">
-            <Link href="/signup" className="font-medium text-blue-600 hover:text-blue-700 transition-colors">
+          <div className="text-center text-sm">
+            <Link href="/signup" className="font-medium text-emerald-400 hover:text-emerald-300 transition-colors">
               Don&apos;t have an account? Sign up
             </Link>
           </div>

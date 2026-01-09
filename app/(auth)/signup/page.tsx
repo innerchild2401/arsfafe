@@ -48,31 +48,31 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4 py-6 sm:py-8">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4 py-6">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Create your account</h1>
-          <p className="text-sm sm:text-base text-gray-600">Sign up to get started</p>
+          <h1 className="text-2xl font-semibold text-zinc-50 mb-2">Create your account</h1>
+          <p className="text-sm text-zinc-400">Sign up to get started</p>
         </div>
         
         <form className="space-y-6" onSubmit={handleSignup}>
           {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 sm:p-4">
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
+              <p className="text-sm text-rose-400">{error}</p>
             </div>
           )}
           {success && (
-            <div className="rounded-lg bg-green-50 border border-green-200 p-3 sm:p-4">
-              <p className="text-sm text-green-800">
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+              <p className="text-sm text-emerald-400">
                 Account created! Please wait for admin approval. Redirecting...
               </p>
             </div>
           )}
           
-          <div className="space-y-4 sm:space-y-5">
+          <div className="space-y-5">
             <div>
-              <label htmlFor="fullName" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
-                Full Name <span className="text-gray-500 font-normal">(optional)</span>
+              <label htmlFor="fullName" className="block text-sm font-medium text-zinc-300 mb-2">
+                Full Name <span className="text-zinc-500 font-normal">(optional)</span>
               </label>
               <input
                 id="fullName"
@@ -80,12 +80,12 @@ export default function SignupPage() {
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                className="underlined-input w-full text-zinc-50"
                 placeholder="John Doe"
               />
             </div>
             <div>
-              <label htmlFor="email" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-medium text-zinc-300 mb-2">
                 Email address
               </label>
               <input
@@ -96,12 +96,12 @@ export default function SignupPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                className="underlined-input w-full text-zinc-50"
                 placeholder="you@example.com"
               />
             </div>
             <div>
-              <label htmlFor="password" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-zinc-300 mb-2">
                 Password
               </label>
               <input
@@ -113,23 +113,23 @@ export default function SignupPage() {
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                className="underlined-input w-full text-zinc-50"
                 placeholder="••••••••"
               />
-              <p className="mt-1.5 text-xs text-gray-500">Must be at least 6 characters</p>
+              <p className="mt-1.5 text-xs text-zinc-500">Must be at least 6 characters</p>
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading || success}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 sm:px-6 sm:py-3 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base transition-colors"
+            className="w-full px-6 py-2.5 bg-zinc-100 text-zinc-900 rounded-lg hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors"
           >
             {loading ? 'Creating account...' : success ? 'Account created!' : 'Sign up'}
           </button>
 
-          <div className="text-center text-sm sm:text-base">
-            <Link href="/login" className="font-medium text-blue-600 hover:text-blue-700 transition-colors">
+          <div className="text-center text-sm">
+            <Link href="/login" className="font-medium text-emerald-400 hover:text-emerald-300 transition-colors">
               Already have an account? Sign in
             </Link>
           </div>

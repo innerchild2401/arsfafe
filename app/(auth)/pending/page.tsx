@@ -23,7 +23,6 @@ export default function PendingPage() {
         return
       }
 
-      // Force refresh the session
       await supabase.auth.refreshSession()
 
       const { data: profile, error: profileError } = await supabase
@@ -40,11 +39,9 @@ export default function PendingPage() {
 
       if (profile) {
         const statusValue = (profile as any).status as string
-        const roleValue = (profile as any).role as string
         setStatus(statusValue)
         
         if (statusValue === 'approved') {
-          // Small delay to show the updated status
           setTimeout(() => {
             router.push('/dashboard')
             router.refresh()
@@ -69,91 +66,71 @@ export default function PendingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-
-  const handleRefresh = () => {
-    checkStatus()
-  }
-
-  const handleGoToDashboard = () => {
-    router.push('/dashboard')
-    router.refresh()
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-50 p-4">
-      <div className="w-full max-w-md space-y-6 rounded-xl bg-white p-6 sm:p-8 shadow-lg border border-gray-200 text-center">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            Account Pending Approval
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4 py-6">
+      <div className="w-full max-w-md space-y-8">
+        <div className="text-center">
+          <div className="relative inline-block mb-6">
+            {/* Radar/Scan Animation */}
+            <div className="relative w-24 h-24 mx-auto radar-scan">
+              <div className="absolute inset-0 rounded-full border-2 border-amber-500/30"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-3 h-3 rounded-full bg-amber-400 animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+          
+          <h2 className="text-2xl font-semibold text-zinc-50 mb-2">
+            Scanning for Admin clearance...
           </h2>
-          <p className="mt-4 text-base text-gray-600">
-            Your account has been created and is waiting for admin approval.
+          <p className="text-sm text-zinc-400">
+            Your account is waiting for approval. This page will automatically update when approved.
           </p>
           
           {error && (
-            <div className="mt-4 rounded-lg bg-red-50 border border-red-200 p-3">
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="mt-4 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
+              <p className="text-sm text-rose-400">{error}</p>
             </div>
           )}
           
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-medium text-gray-700 mb-1">Current Status:</p>
-            <p className={`text-lg font-bold ${
-              status === 'approved' ? 'text-green-600' : 
-              status === 'rejected' ? 'text-red-600' : 
-              'text-yellow-600'
+          <div className="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
+            <p className="text-xs font-medium text-zinc-400 mb-2 uppercase tracking-wider">Status</p>
+            <p className={`text-lg font-semibold font-mono ${
+              status === 'approved' ? 'text-emerald-400' : 
+              status === 'rejected' ? 'text-rose-400' : 
+              'text-amber-400'
             }`}>
               {status ? status.toUpperCase() : 'PENDING'}
             </p>
           </div>
           
           {status === 'approved' && (
-            <div className="mt-4 rounded-lg bg-green-50 border border-green-200 p-4">
-              <p className="text-sm font-medium text-green-800 mb-3">
+            <div className="mt-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4">
+              <p className="text-sm font-medium text-emerald-400 mb-3">
                 ✓ Your account has been approved!
               </p>
-              <button
-                onClick={handleGoToDashboard}
-                className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
-              >
-                Go to Dashboard
-              </button>
+              <p className="text-xs text-zinc-400">Redirecting to dashboard...</p>
             </div>
-          )}
-          
-          {status !== 'approved' && (
-            <p className="mt-4 text-sm text-gray-500">
-              This page will automatically refresh when your account is approved.
-            </p>
           )}
         </div>
         
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex gap-3">
           <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Checking...' : 'Refresh Status'}
-          </button>
-          <button
-            onClick={async () => {
-              const supabase = createClient()
-              await supabase.auth.signOut()
-              router.push('/login')
-            }}
-            className="flex-1 rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300 transition-colors"
+            onClick={handleSignOut}
+            className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 transition-colors"
           >
             Sign Out
           </button>
         </div>
-        
-        {loading && status !== 'approved' && (
-          <div className="flex justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></div>
-          </div>
-        )}
       </div>
     </div>
   )
 }
+
+export const dynamic = 'force-dynamic'

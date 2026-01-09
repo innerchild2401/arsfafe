@@ -3,8 +3,14 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { getBackendUrl } from '@/lib/api'
+import TerminalDrawer from '@/components/TerminalDrawer'
+
+interface TerminalLog {
+  timestamp: Date
+  level: 'info' | 'success' | 'error' | 'warning'
+  message: string
+}
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -13,8 +19,15 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([])
+  const [showTerminal, setShowTerminal] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  const addLog = (level: TerminalLog['level'], message: string) => {
+    setTerminalLogs(prev => [...prev, { timestamp: new Date(), level, message }])
+    setShowTerminal(true)
+  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -52,6 +65,11 @@ export default function UploadPage() {
     setUploading(true)
     setError(null)
     setSuccess(false)
+    setTerminalLogs([])
+    setShowTerminal(true)
+
+    addLog('info', `Starting upload: ${file.name}`)
+    addLog('info', `File size: ${(file.size / 1024 / 1024).toFixed(2)} MB`)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -60,12 +78,16 @@ export default function UploadPage() {
         throw new Error('Not authenticated')
       }
 
+      addLog('info', 'Authenticated. Preparing upload...')
+
       const formData = new FormData()
       formData.append('file', file)
       if (title) formData.append('title', title)
       if (author) formData.append('author', author)
 
       const backendUrl = getBackendUrl()
+
+      addLog('info', 'Uploading to server...')
 
       const response = await fetch(`${backendUrl}/api/books/upload`, {
         method: 'POST',
@@ -80,14 +102,19 @@ export default function UploadPage() {
         throw new Error(errorData.detail || `Upload failed: ${response.statusText}`)
       }
 
+      addLog('success', 'Upload successful!')
+      addLog('info', 'Processing started in background...')
+      addLog('info', 'You can close this terminal. Check your library for status updates.')
+
       setSuccess(true)
       
       setTimeout(() => {
         router.push('/dashboard')
         router.refresh()
-      }, 2000)
+      }, 3000)
       
     } catch (error: any) {
+      addLog('error', `Upload failed: ${error.message}`)
       setError(error.message || 'Failed to upload book')
     } finally {
       setUploading(false)
@@ -95,95 +122,104 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
-        <div className="mb-6 sm:mb-8">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-1.5 text-sm sm:text-base font-medium text-blue-600 hover:text-blue-700 mb-4 sm:mb-6 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to Dashboard
-          </Link>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">Upload Book</h1>
-          <p className="text-sm sm:text-base text-gray-600">Add a PDF or EPUB file to your knowledge center</p>
-        </div>
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-2xl mx-auto px-6 py-8">
+          <div className="mb-8">
+            <h1 className="text-2xl font-semibold text-zinc-50 mb-2">Import</h1>
+            <p className="text-sm text-zinc-400">Add a PDF or EPUB file to your knowledge center</p>
+          </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 lg:p-8">
-          <form onSubmit={handleUpload} className="space-y-6">
+          <div className="bg-zinc-900/30 border border-zinc-800 rounded-lg p-6 space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4">
-                <p className="text-sm text-red-800">{error}</p>
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-4">
+                <p className="text-sm text-rose-400">{error}</p>
               </div>
             )}
 
             {success && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
-                <p className="text-sm text-green-800">Book uploaded successfully! Processing in background...</p>
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4">
+                <p className="text-sm text-emerald-400">Book uploaded successfully! Processing in background...</p>
               </div>
             )}
 
-            <div>
-              <label htmlFor="file" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
-                Book File <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="file"
-                type="file"
-                accept=".pdf,.epub,application/pdf,application/epub+zip"
-                onChange={handleFileChange}
-                disabled={uploading}
-                className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed file:mr-4 file:py-2 file:px-4 file:rounded-l-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
-              />
-              {file && (
-                <p className="mt-2 text-sm text-gray-600">
-                  {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-                </p>
-              )}
-            </div>
+            <form onSubmit={handleUpload} className="space-y-6">
+              <div>
+                <label htmlFor="file" className="block text-sm font-medium text-zinc-300 mb-2">
+                  Book File <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  id="file"
+                  type="file"
+                  accept=".pdf,.epub,application/pdf,application/epub+zip"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                  className="block w-full text-sm text-zinc-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                {file && (
+                  <p className="mt-2 text-sm font-mono text-zinc-500">
+                    {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+              </div>
 
-            <div>
-              <label htmlFor="title" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
-                Title <span className="text-gray-500 font-normal">(optional)</span>
-              </label>
-              <input
-                id="title"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={uploading}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
-                placeholder="Book title"
-              />
-            </div>
+              <div>
+                <label htmlFor="title" className="block text-sm font-medium text-zinc-300 mb-2">
+                  Title <span className="text-zinc-500 font-normal">(optional)</span>
+                </label>
+                <input
+                  id="title"
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={uploading}
+                  className="underlined-input w-full text-zinc-50"
+                  placeholder="Book title"
+                />
+              </div>
 
-            <div>
-              <label htmlFor="author" className="block text-sm sm:text-base font-medium text-gray-700 mb-2">
-                Author <span className="text-gray-500 font-normal">(optional)</span>
-              </label>
-              <input
-                id="author"
-                type="text"
-                value={author}
-                onChange={(e) => setAuthor(e.target.value)}
-                disabled={uploading}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
-                placeholder="Author name"
-              />
-            </div>
+              <div>
+                <label htmlFor="author" className="block text-sm font-medium text-zinc-300 mb-2">
+                  Author <span className="text-zinc-500 font-normal">(optional)</span>
+                </label>
+                <input
+                  id="author"
+                  type="text"
+                  value={author}
+                  onChange={(e) => setAuthor(e.target.value)}
+                  disabled={uploading}
+                  className="underlined-input w-full text-zinc-50"
+                  placeholder="Author name"
+                />
+              </div>
 
-            <button
-              type="submit"
-              disabled={uploading || !file || success}
-              className="w-full bg-blue-600 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm sm:text-base transition-colors"
-            >
-              {uploading ? 'Uploading...' : success ? 'Uploaded!' : 'Upload Book'}
-            </button>
-          </form>
+              <div className="flex items-center justify-between pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowTerminal(!showTerminal)}
+                  className="text-xs font-mono text-zinc-400 hover:text-zinc-300 transition-colors"
+                >
+                  {showTerminal ? 'Hide' : 'Show'} Terminal
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading || !file || success}
+                  className="px-6 py-2.5 bg-zinc-100 text-zinc-900 rounded-lg hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors"
+                >
+                  {uploading ? 'Uploading...' : success ? 'Uploaded!' : 'Import Book'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
+
+      {/* Terminal Drawer */}
+      <TerminalDrawer
+        isOpen={showTerminal}
+        logs={terminalLogs}
+        onClose={() => setShowTerminal(false)}
+      />
     </div>
   )
 }
