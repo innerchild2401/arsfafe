@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600&display=swap');
 
 * {
   box-sizing: border-box;
@@ -38,7 +38,7 @@ body {
 }
 
 .font-serif {
-  font-family: 'Merriweather', Georgia, serif;
+  font-family: 'Source Serif 4', Georgia, serif;
 }
 
 /* Touch targets - minimum 44x44px for mobile */
@@ -77,29 +77,33 @@ button {
   color: rgb(113, 113, 122); /* zinc-500 */
 }
 
-/* Signal Color Badges */
+/* Signal Color Badges - Outline Only */
 .badge-emerald {
   border: 1px solid rgba(16, 185, 129, 0.5);
   color: rgb(52, 211, 153); /* emerald-400 */
-  background: rgba(16, 185, 129, 0.1);
+  background: transparent;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.3);
 }
 
 .badge-amber {
   border: 1px solid rgba(245, 158, 11, 0.5);
   color: rgb(251, 191, 36); /* amber-400 */
-  background: rgba(245, 158, 11, 0.1);
+  background: transparent;
+  box-shadow: 0 0 5px rgba(245, 158, 11, 0.3);
 }
 
 .badge-rose {
   border: 1px solid rgba(244, 63, 94, 0.5);
   color: rgb(251, 113, 133); /* rose-400 */
-  background: rgba(244, 63, 94, 0.1);
+  background: transparent;
+  box-shadow: 0 0 5px rgba(244, 63, 94, 0.3);
 }
 
 .badge-violet {
   border: 1px solid rgba(139, 92, 246, 0.5);
   color: rgb(167, 139, 250); /* violet-400 */
-  background: rgba(139, 92, 246, 0.1);
+  background: transparent;
+  box-shadow: 0 0 5px rgba(139, 92, 246, 0.3);
 }
 
 /* Shimmer Effect for Loading */

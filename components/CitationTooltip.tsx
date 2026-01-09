@@ -6,17 +6,42 @@ interface CitationTooltipProps {
   refNumber: number
   text: string
   source?: string
+  chunkId?: string
+  pageNumber?: number
+  onCitationClick?: (chunkId?: string, pageNumber?: number) => void
 }
 
-export default function CitationTooltip({ refNumber, text, source }: CitationTooltipProps) {
+export default function CitationTooltip({ 
+  refNumber, 
+  text, 
+  source,
+  chunkId,
+  pageNumber,
+  onCitationClick 
+}: CitationTooltipProps) {
   const [isOpen, setIsOpen] = useState(false)
+
+  const handleClick = () => {
+    if (onCitationClick && (chunkId || pageNumber)) {
+      onCitationClick(chunkId, pageNumber)
+    }
+  }
 
   return (
     <span className="relative inline-block">
       <button
+        onClick={handleClick}
         onMouseEnter={() => setIsOpen(true)}
         onMouseLeave={() => setIsOpen(false)}
-        className="inline-flex items-center px-1.5 py-0.5 mx-0.5 text-xs font-mono bg-violet-500/20 border border-violet-500/30 text-violet-400 rounded hover:bg-violet-500/30 transition-colors"
+        className={`inline-flex items-center px-1.5 py-0.5 mx-0.5 text-xs font-mono border border-violet-500/30 text-violet-400 rounded transition-colors ${
+          chunkId || pageNumber 
+            ? 'cursor-pointer hover:bg-violet-500/20 hover:border-violet-500/50' 
+            : 'cursor-default'
+        }`}
+        style={{
+          background: 'transparent',
+          boxShadow: '0 0 5px rgba(139, 92, 246, 0.3)'
+        }}
       >
         [Ref: {refNumber}]
       </button>
@@ -33,6 +58,11 @@ export default function CitationTooltip({ refNumber, text, source }: CitationToo
             {source && (
               <div className="mt-2 text-xs text-zinc-400 font-mono">
                 {source}
+              </div>
+            )}
+            {(chunkId || pageNumber) && (
+              <div className="mt-2 text-xs text-emerald-400 font-mono">
+                Click to view source
               </div>
             )}
             {/* Arrow */}
