@@ -615,17 +615,51 @@ async def trigger_processing(
     
     book = book_result.data[0]
     
-    # Check if book has extracted text
-    # Note: extracted_text in DB only stores first 10K chars, need full text from file
-    # For now, check if we have enough text to process
-    extracted_text_preview = book.get("extracted_text", "")
-    if not extracted_text_preview or len(extracted_text_preview) < 100:
-        raise HTTPException(status_code=400, detail="Book has no extracted text to process. Please re-upload the book.")
+    # Check if book has file path to download from storage
+    file_path = book.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="Book has no file stored. Please re-upload the book.")
     
-    # Get full extracted text from storage or use what we have
-    # For retry, we'll need to re-extract if text is truncated
-    # For now, we'll use the preview text and let the user know if it fails
-    extracted_text = extracted_text_preview
+    # Download file from storage and re-extract full text
+    print(f"📥 Downloading file from storage: {file_path}")
+    try:
+        from app.services.storage_service import get_file_from_storage
+        from app.services.pdf_extractor import extract_text_from_pdf, classify_pdf
+        from app.services.epub_extractor import extract_text_from_epub
+        
+        file_content = get_file_from_storage(file_path, supabase)
+        file_type = book.get("file_type", "pdf")
+        
+        # Re-extract full text from file
+        print(f"📖 Re-extracting full text from {file_type} file...")
+        if file_type == "pdf":
+            pdf_class = classify_pdf(file_content)
+            if pdf_class == "simple":
+                extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
+            else:
+                extracted_text, is_native, pdf_metadata = extract_text_from_pdf(file_content)
+        elif file_type == "epub":
+            extracted_text, epub_metadata = extract_text_from_epub(file_content)
+            pdf_metadata = {
+                "total_pages": epub_metadata.get("total_chapters", 0),
+                "title": epub_metadata.get("title"),
+                "author": epub_metadata.get("author")
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
+        
+        if not extracted_text or len(extracted_text.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Could not extract text from file")
+        
+        print(f"✅ Re-extracted {len(extracted_text):,} characters")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to download/extract file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to download or extract file: {str(e)}")
     
     # Clean up existing chunks before retrying
     try:
@@ -639,11 +673,12 @@ async def trigger_processing(
     # Update status to processing
     supabase.table("books").update({
         "status": "processing",
-        "processing_error": None
+        "processing_error": None,
+        "extracted_text": extracted_text[:10000]  # Update preview text with full extraction
     }).eq("id", book_id).execute()
     
-    # Start processing
-    print(f"🔄 Manually triggering processing for book {book_id}")
+    # Start processing with full extracted text
+    print(f"🔄 Manually triggering processing for book {book_id} with full text")
     try:
         import asyncio
         try:
@@ -653,8 +688,8 @@ async def trigger_processing(
                 future = executor.submit(
                     process_book,
                     book_id=book_id,
-                    extracted_text=extracted_text,
-                    file_type=book.get("file_type", "pdf"),
+                    extracted_text=extracted_text,  # Full extracted text
+                    file_type=file_type,
                     title=book.get("title"),
                     author=book.get("author")
                 )
@@ -662,14 +697,14 @@ async def trigger_processing(
         except RuntimeError:
             process_book(
                 book_id=book_id,
-                extracted_text=extracted_text,
-                file_type=book.get("file_type", "pdf"),
+                extracted_text=extracted_text,  # Full extracted text
+                file_type=file_type,
                 title=book.get("title"),
                 author=book.get("author")
             )
             print(f"✅ Processing completed synchronously")
         
-        return {"message": "Processing started", "book_id": book_id}
+        return {"message": "Processing started - retrying with full text extraction", "book_id": book_id}
     except Exception as e:
         print(f"❌ Error starting processing: {str(e)}")
         import traceback
