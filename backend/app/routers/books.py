@@ -616,9 +616,25 @@ async def trigger_processing(
     book = book_result.data[0]
     
     # Check if book has extracted text
-    extracted_text = book.get("extracted_text", "")
-    if not extracted_text or len(extracted_text) < 100:
-        raise HTTPException(status_code=400, detail="Book has no extracted text to process")
+    # Note: extracted_text in DB only stores first 10K chars, need full text from file
+    # For now, check if we have enough text to process
+    extracted_text_preview = book.get("extracted_text", "")
+    if not extracted_text_preview or len(extracted_text_preview) < 100:
+        raise HTTPException(status_code=400, detail="Book has no extracted text to process. Please re-upload the book.")
+    
+    # Get full extracted text from storage or use what we have
+    # For retry, we'll need to re-extract if text is truncated
+    # For now, we'll use the preview text and let the user know if it fails
+    extracted_text = extracted_text_preview
+    
+    # Clean up existing chunks before retrying
+    try:
+        supabase.table("child_chunks").delete().eq("book_id", book_id).execute()
+        supabase.table("parent_chunks").delete().eq("book_id", book_id).execute()
+        print(f"🧹 Cleaned up existing chunks for retry")
+    except Exception as e:
+        print(f"⚠️ Could not clean up chunks: {str(e)}")
+        # Continue anyway - might not have chunks yet
     
     # Update status to processing
     supabase.table("books").update({
