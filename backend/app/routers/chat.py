@@ -96,37 +96,125 @@ async def chat(
     # Generate query embedding
     query_embedding = generate_embedding(chat_message.message)
     
+    # Detect if this is a general/summarization query (lower threshold needed)
+    user_message_lower = chat_message.message.lower()
+    is_general_query = any(keyword in user_message_lower for keyword in [
+        "summarize", "summarise", "summary", "overview", "what is this book about",
+        "tell me about", "describe", "explain", "what does", "what is"
+    ])
+    
+    # Adjust threshold based on query type
+    match_threshold = 0.5 if is_general_query else 0.7  # Lower threshold for general queries
+    match_count = 10 if is_general_query else 5  # More chunks for summarization
+    
     # Search for relevant chunks using vector search
+    chunks = []
     try:
         chunks_result = supabase.rpc(
             "match_child_chunks",
             {
                 "query_embedding": query_embedding,
-                "match_threshold": 0.7,
-                "match_count": 5,
+                "match_threshold": match_threshold,
+                "match_count": match_count,
                 "book_ids": book_ids
             }
         ).execute()
         
         chunks = chunks_result.data if chunks_result.data else []
+        print(f"🔍 Vector search found {len(chunks)} chunks with threshold {match_threshold}")
+        
+        # If no chunks found with threshold, try with lower threshold as fallback
+        if not chunks and match_threshold > 0.3:
+            print(f"⚠️ No chunks found with threshold {match_threshold}, trying lower threshold 0.3...")
+            chunks_result = supabase.rpc(
+                "match_child_chunks",
+                {
+                    "query_embedding": query_embedding,
+                    "match_threshold": 0.3,  # Very low threshold - get any chunks
+                    "match_count": match_count,
+                    "book_ids": book_ids
+                }
+            ).execute()
+            
+            chunks = chunks_result.data if chunks_result.data else []
+            print(f"🔍 Fallback search found {len(chunks)} chunks with threshold 0.3")
         
     except Exception as e:
-        # Fallback: simple text search if vector search fails
-        print(f"Vector search failed, using fallback: {str(e)}")
+        # Fallback: get chunks without vector search (any chunks from the book)
+        print(f"❌ Vector search failed: {str(e)}")
+        print(f"⚠️ Falling back to simple chunk retrieval...")
         chunks = []
         for book_id in book_ids:
             chunks_query = supabase.table("child_chunks").select(
-                "id, text, parent_id, parent_chunks(chapter_title, section_title), books(title)"
-            ).eq("book_id", book_id).limit(5).execute()
+                "id, text, parent_id, book_id, paragraph_index, page_number, parent_chunks(chapter_title, section_title), books(title)"
+            ).eq("book_id", book_id).not_.is_("embedding", "null").limit(10).execute()
             
             if chunks_query.data:
-                chunks.extend(chunks_query.data)
+                # Format chunks to match expected structure
+                formatted_chunks = []
+                for chunk in chunks_query.data:
+                    parent = chunk.get("parent_chunks") or {}
+                    book = chunk.get("books") or {}
+                    formatted_chunks.append({
+                        "id": chunk["id"],
+                        "text": chunk["text"],
+                        "parent_id": chunk["parent_id"],
+                        "book_id": chunk["book_id"],
+                        "paragraph_index": chunk.get("paragraph_index"),
+                        "page_number": chunk.get("page_number"),
+                        "chapter_title": parent.get("chapter_title", ""),
+                        "section_title": parent.get("section_title", ""),
+                        "book_title": book.get("title", "Unknown Book"),
+                        "similarity": 0.5  # Default similarity for fallback
+                    })
+                chunks.extend(formatted_chunks)
         
-        chunks = chunks[:5]
+        chunks = chunks[:match_count] if chunks else []
+        print(f"🔍 Fallback retrieved {len(chunks)} chunks")
     
     if not chunks:
+        # Last resort: get any chunks from the books (even without embeddings)
+        print(f"⚠️ No chunks with embeddings found, trying to get any chunks...")
+        for book_id in book_ids:
+            chunks_query = supabase.table("child_chunks").select(
+                "id, text, parent_id, book_id, paragraph_index, page_number, parent_chunks(chapter_title, section_title), books(title)"
+            ).eq("book_id", book_id).limit(10).execute()
+            
+            if chunks_query.data:
+                formatted_chunks = []
+                for chunk in chunks_query.data:
+                    parent = chunk.get("parent_chunks") or {}
+                    book = chunk.get("books") or {}
+                    formatted_chunks.append({
+                        "id": chunk["id"],
+                        "text": chunk["text"],
+                        "parent_id": chunk["parent_id"],
+                        "book_id": chunk["book_id"],
+                        "paragraph_index": chunk.get("paragraph_index"),
+                        "page_number": chunk.get("page_number"),
+                        "chapter_title": parent.get("chapter_title", ""),
+                        "section_title": parent.get("section_title", ""),
+                        "book_title": book.get("title", "Unknown Book"),
+                        "similarity": 0.5
+                    })
+                chunks.extend(formatted_chunks)
+        
+        chunks = chunks[:match_count] if chunks else []
+        print(f"🔍 Last resort retrieved {len(chunks)} chunks")
+    
+    if not chunks:
+        # If still no chunks, check if book exists and has chunks
+        print(f"❌ No chunks found at all. Checking if books have chunks...")
+        for book_id in book_ids:
+            chunk_count = supabase.table("child_chunks").select("id", count="exact").eq("book_id", book_id).execute()
+            print(f"   Book {book_id} has {chunk_count.count if hasattr(chunk_count, 'count') else len(chunk_count.data)} chunks")
+            
+            # Check if chunks have embeddings
+            embedded_count = supabase.table("child_chunks").select("id", count="exact").eq("book_id", book_id).not_.is_("embedding", "null").execute()
+            print(f"   Book {book_id} has {embedded_count.count if hasattr(embedded_count, 'count') else len(embedded_count.data)} chunks with embeddings")
+        
         # If no chunks found, still try to answer general questions
-        assistant_message = "I couldn't find relevant information in your uploaded books to answer that question. Could you try rephrasing it, or ask about a specific topic that might be covered in your books?"
+        assistant_message = "I couldn't find any processed content in your uploaded books. The book may still be processing, or there may be an issue with the chunks. Please check the book status or try re-uploading the book."
         
         # Save messages
         supabase.table("chat_messages").insert({
@@ -158,23 +246,37 @@ async def chat(
     # Build context from chunks
     context_parts = []
     sources = []
+    source_set = set()  # Track unique sources for deduplication
     
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks):
         # Handle both RPC result format and direct query format
-        book_title = chunk.get("book_title") or chunk.get("books", {}).get("title", "Unknown Book")
-        chapter = chunk.get("chapter_title") or chunk.get("parent_chunks", {}).get("chapter_title", "")
-        section = chunk.get("section_title") or chunk.get("parent_chunks", {}).get("section_title", "")
+        book_title = chunk.get("book_title") or chunk.get("books", {}).get("title") or "Unknown Book"
+        chapter = chunk.get("chapter_title") or (chunk.get("parent_chunks") or {}).get("chapter_title") or ""
+        section = chunk.get("section_title") or (chunk.get("parent_chunks") or {}).get("section_title") or ""
         
-        source = f"{book_title}"
+        # Build source string
+        source_parts = [book_title]
         if chapter:
-            source += f", {chapter}"
-        if section:
-            source += f", {section}"
+            source_parts.append(chapter)
+        if section and section != chapter:
+            source_parts.append(section)
         
-        context_parts.append(f"[{source}]: {chunk['text']}")
-        sources.append(source)
+        source = ", ".join(source_parts)
+        source_key = f"{book_title}|{chapter}|{section}"
+        
+        # Add chunk to context with citation reference
+        ref_num = idx + 1
+        context_parts.append(f"[Ref: {ref_num}] {chunk['text']}")
+        
+        # Track source (deduplicated)
+        if source_key not in source_set:
+            sources.append(source)
+            source_set.add(source_key)
     
     context = "\n\n".join(context_parts)
+    
+    # Build source list for response (indexed for citations)
+    sources_list = list(set(sources))  # Final deduplication
     
     # Generate response with GPT
     from openai import OpenAI
@@ -186,9 +288,11 @@ async def chat(
     system_prompt = """You are Zorxido, a helpful AI assistant that answers questions based on the provided context from books. 
 - Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
 - You are designed to help users understand and explore their uploaded books.
-- Always cite your sources from the provided context.
-- If the context doesn't contain enough information to answer a question, politely say so and explain that you can only answer based on the books the user has uploaded.
-- Stay focused on the content from the user's books. If asked about topics not in the books, politely redirect to what you can help with based on their uploaded content."""
+- Always cite your sources using [Ref: N] format where N is the reference number from the context.
+- Use the context provided to answer questions. If the user asks to "summarise" or "summarize" a book, provide a comprehensive summary based on all the context provided.
+- If the context doesn't contain enough information to fully answer a question, answer based on what is available and mention that your answer is based on the provided context.
+- Stay focused on the content from the user's books. If asked about topics not in the books, politely redirect to what you can help with based on their uploaded content.
+- For general questions like "summarise this book", use all the provided context to create a comprehensive summary."""
     
     response = client.chat.completions.create(
         model=settings.chat_model,
@@ -240,7 +344,7 @@ async def chat(
     
     return ChatResponse(
         response=assistant_message,
-        sources=list(set(sources)),  # Remove duplicates
+        sources=sources_list,  # Use deduplicated sources list
         tokens_used=tokens_used
     )
 
