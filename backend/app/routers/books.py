@@ -22,6 +22,7 @@ from app.services.embedding_service import generate_embeddings_batch
 from app.services.topic_labeler import generate_topic_labels
 from app.services.storage_service import upload_file_to_storage
 from app.services.log_service import log_info, log_success, log_error, log_warning
+from app.services.summary_service import generate_chapter_summary, generate_book_summary
 
 router = APIRouter()
 
@@ -456,6 +457,7 @@ def process_book(
         print(f"📦 Step 2: Creating chunks...")
         parent_chunks = []
         child_chunks = []
+        chapter_summaries = []  # Collect chapter summaries for book-level summary
         
         num_chapters = len(structured_json["document"]["chapters"])
         log_info(book_id, f"Found {num_chapters} chapters")
@@ -465,6 +467,10 @@ def process_book(
             chapter_title = chapter.get("chapter_title", "Untitled Chapter")
             log_info(book_id, f"Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter_title[:50]}")
             print(f"📖 Processing chapter {chapter_idx + 1}/{num_chapters}: {chapter_title}")
+            
+            # Collect all text and summaries for this chapter
+            chapter_full_text_parts = []
+            chapter_section_summaries = []
             
             for section in chapter.get("sections", []):
                 section_title = section.get("section_title") or ""  # Handle None case
@@ -482,8 +488,9 @@ def process_book(
                 
                 # Create parent chunk (full section)
                 parent_text = "\n\n".join(paragraphs)
+                chapter_full_text_parts.append(parent_text)  # Collect for chapter summary
                 
-                # Generate topic labels
+                # Generate topic labels and section summary
                 section_display = section_title[:50] if section_title else "(Untitled Section)"
                 log_info(book_id, f"Labeling section: {section_display}")
                 print(f"🏷️  Generating topic labels for section: {section_display}...")
@@ -491,13 +498,24 @@ def process_book(
                 log_success(book_id, f"Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 print(f"✅ Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 
-                # Insert parent chunk
+                # Generate concise summary for this section (for parent_chunks.concise_summary)
+                section_summary = None
+                try:
+                    section_summary = generate_chapter_summary(parent_text, f"{chapter_title} - {section_title}" if section_title else chapter_title)
+                    chapter_section_summaries.append(section_summary)  # Collect for chapter summary
+                    print(f"📝 Generated section summary ({len(section_summary)} chars)")
+                except Exception as e:
+                    print(f"⚠️ Failed to generate section summary: {str(e)}")
+                    # Continue without summary - not critical
+                
+                # Insert parent chunk with summary
                 parent_data = {
                     "book_id": book_id,
                     "chapter_title": chapter_title,
                     "section_title": section_title,
                     "full_text": parent_text,
-                    "topic_labels": topic_labels
+                    "topic_labels": topic_labels,
+                    "concise_summary": section_summary  # Store section summary
                 }
                 
                 parent_result = supabase.table("parent_chunks").insert(parent_data).execute()
@@ -529,18 +547,57 @@ def process_book(
                         
                         supabase.table("child_chunks").insert(child_data).execute()
                         child_chunks.append({"id": child_data.get("id"), "text": text})
+            
+            # Build chapter summary from section summaries
+            if chapter_section_summaries:
+                # Combine section summaries for chapter-level summary
+                combined_chapter_text = "\n\n".join(chapter_section_summaries)
+                chapter_summaries.append(f"{chapter_title}: {combined_chapter_text[:800]}")  # Limit length
+            elif chapter_full_text_parts:
+                # Fallback: generate summary from full chapter text
+                chapter_full_text = "\n\n".join(chapter_full_text_parts)
+                log_info(book_id, f"Generating summary for chapter: {chapter_title[:50]}")
+                print(f"📝 Generating summary for chapter: {chapter_title}...")
+                try:
+                    chapter_summary = generate_chapter_summary(chapter_full_text, chapter_title)
+                    chapter_summaries.append(chapter_summary)
+                    log_success(book_id, f"Generated chapter summary ({len(chapter_summary)} chars)")
+                    print(f"✅ Generated chapter summary")
+                except Exception as e:
+                    print(f"⚠️ Failed to generate chapter summary: {str(e)}")
+                    # Continue without summary - not critical
+                    chapter_summaries.append(f"{chapter_title}: {chapter_full_text[:300]}...")
         
-        # Update book status
+        # Step 3: Generate book-level executive summary
+        log_info(book_id, "Generating book-level executive summary...")
+        print(f"📚 Step 3: Generating book-level executive summary...")
+        global_summary = None
+        if chapter_summaries:
+            try:
+                global_summary = generate_book_summary(chapter_summaries, title, author)
+                log_success(book_id, f"Generated book summary ({len(global_summary)} chars)")
+                print(f"✅ Generated book-level executive summary")
+            except Exception as e:
+                print(f"⚠️ Failed to generate book summary: {str(e)}")
+                # Fallback: use first few chapter summaries
+                global_summary = "\n\n".join(chapter_summaries[:5])
+        
+        # Update book status with summary
         total_chunks = len(parent_chunks) + len(child_chunks)
         
-        supabase.table("books").update({
+        update_data = {
             "status": "ready",
             "total_chunks": total_chunks,
             "processed_at": datetime.utcnow().isoformat()
-        }).eq("id", book_id).execute()
+        }
         
-        log_success(book_id, f"Processing completed: {total_chunks} chunks created")
-        print(f"Book {book_id} processed successfully: {total_chunks} chunks created")
+        if global_summary:
+            update_data["global_summary"] = global_summary
+        
+        supabase.table("books").update(update_data).eq("id", book_id).execute()
+        
+        log_success(book_id, f"Processing completed: {total_chunks} chunks created, summary generated")
+        print(f"Book {book_id} processed successfully: {total_chunks} chunks created, summary: {'yes' if global_summary else 'no'}")
         
     except Exception as e:
         # Update book status to error
