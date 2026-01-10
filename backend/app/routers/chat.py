@@ -23,6 +23,8 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     sources: List[str]
+    retrieved_chunks: Optional[List[str]] = None  # List of chunk UUIDs for citation mapping
+    chunk_map: Optional[dict] = None  # Map of persistent IDs (#chk_xxx) to chunk UUIDs
     tokens_used: Optional[int] = None
 
 class CorrectionRequest(BaseModel):
@@ -97,6 +99,7 @@ async def chat(
             "content": assistant_message,
             "retrieved_chunks": [],
             "sources": [],
+            "chunk_map": {},  # No chunks for direct response
             "tokens_used": None,
             "model_used": "direct_response"
         }).execute()
@@ -104,6 +107,7 @@ async def chat(
         return ChatResponse(
             response=assistant_message,
             sources=[],
+            retrieved_chunks=[],
             tokens_used=None
         )
     
@@ -196,6 +200,7 @@ Instruction: Present this summary in a clear, structured format. If the user ask
                 "content": assistant_message,
                 "retrieved_chunks": [],
                 "sources": [f"{book.get('title', 'Unknown')} (Executive Summary)"],
+                "chunk_map": {},  # No chunks for summary path
                 "tokens_used": tokens_used,
                 "model_used": "global_summary_path"
             }).execute()
@@ -203,6 +208,7 @@ Instruction: Present this summary in a clear, structured format. If the user ask
             return ChatResponse(
                 response=assistant_message,
                 sources=[f"{book.get('title', 'Unknown')} (Executive Summary)"],
+                retrieved_chunks=[],
                 tokens_used=tokens_used
             )
         
@@ -292,6 +298,7 @@ Present this in a clear, informative format."""
                     "content": assistant_message,
                     "retrieved_chunks": [],
                     "sources": [f"{book.get('title', 'Unknown')} (Table of Contents)"],
+                    "chunk_map": {},  # No chunks for ToC path
                     "tokens_used": tokens_used,
                     "model_used": "toc_hack_path"
                 }).execute()
@@ -299,6 +306,7 @@ Present this in a clear, informative format."""
                 return ChatResponse(
                     response=assistant_message,
                     sources=[f"{book.get('title', 'Unknown')} (Table of Contents)"],
+                    retrieved_chunks=[],
                     tokens_used=tokens_used
                 )
             else:
@@ -367,15 +375,15 @@ Present this in a clear, informative format."""
             
             # Build context with parent chunk text and persistent citations (Phase 3)
             context_parts = []
-            chunk_map = {}  # Map chunk IDs to citations
+            chunk_map_reverse = {}  # Map persistent IDs to chunk UUIDs (for frontend lookup)
             sources = []
             source_set = set()
             
             for chunk in chunks:
                 chunk_id = chunk.get("id")
                 chunk_uuid = str(chunk_id) if chunk_id else ""
-                persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map)}"
-                chunk_map[chunk_uuid] = persistent_id
+                persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map_reverse)}"
+                chunk_map_reverse[persistent_id] = chunk_uuid  # Reverse mapping for frontend
                 
                 # Use parent context text if available, else use child text
                 context_text = chunk.get("context_text") or chunk.get("parent_text") or chunk.get("text", "")
@@ -482,6 +490,7 @@ FORMAT:
                 "content": assistant_message,
                 "retrieved_chunks": retrieved_chunk_ids,
                 "sources": sources_list,
+                "chunk_map": chunk_map_reverse,  # Store persistent ID -> UUID mapping
                 "tokens_used": tokens_used,
                 "model_used": f"deep_reasoner_{settings.reasoning_model}"
             }).execute()
@@ -494,6 +503,8 @@ FORMAT:
             return ChatResponse(
                 response=assistant_message,
                 sources=sources_list,
+                retrieved_chunks=retrieved_chunk_ids,  # Include chunk IDs for citation mapping
+                chunk_map=chunk_map_reverse,  # Include persistent ID -> UUID mapping
                 tokens_used=tokens_used
             )
     
@@ -658,6 +669,7 @@ FORMAT:
                 "content": assistant_message,
                 "retrieved_chunks": [],
                 "sources": [],
+                "chunk_map": {},  # No chunks for no context response
                 "tokens_used": None,
                 "model_used": "no_context_response"
             }).execute()
@@ -665,6 +677,7 @@ FORMAT:
             return ChatResponse(
                 response=assistant_message,
                 sources=[],
+                retrieved_chunks=[],
                 tokens_used=None
             )
         
@@ -679,7 +692,7 @@ FORMAT:
             
             # Phase 3: Build context with parent chunk text and persistent citations (#chk_xxx)
             context_parts = []
-            chunk_map = {}  # Map chunk UUIDs to persistent IDs
+            chunk_map_reverse = {}  # Map persistent IDs to chunk UUIDs (for frontend lookup)
             sources = []
             source_set = set()  # Track unique sources for deduplication
             
@@ -688,8 +701,8 @@ FORMAT:
                 chunk_uuid = str(chunk_id) if chunk_id else ""
                 
                 # Generate persistent chunk ID (Phase 3: Persistent Citations)
-                persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map)}"
-                chunk_map[chunk_uuid] = persistent_id
+                persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map_reverse)}"
+                chunk_map_reverse[persistent_id] = chunk_uuid  # Reverse mapping for frontend
                 
                 # Use parent context text if available, else use child text (Phase 2: Parent Context)
                 context_text = chunk.get("context_text") or chunk.get("parent_text") or chunk.get("text", "")
@@ -803,6 +816,7 @@ FORMAT:
                 "content": assistant_message,
                 "retrieved_chunks": retrieved_chunk_ids,
                 "sources": sources_list,  # Use deduplicated sources
+                "chunk_map": chunk_map_reverse,  # Store persistent ID -> UUID mapping
                 "tokens_used": tokens_used,
                 "model_used": f"investigator_{settings.chat_model}"
             }).execute()
@@ -815,6 +829,8 @@ FORMAT:
             return ChatResponse(
                 response=assistant_message,
                 sources=sources_list,  # Use deduplicated sources list
+                retrieved_chunks=retrieved_chunk_ids,  # Include chunk IDs for citation mapping
+                chunk_map=chunk_map_reverse,  # Include persistent ID -> UUID mapping
                 tokens_used=tokens_used
             )
 

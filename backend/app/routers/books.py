@@ -943,3 +943,82 @@ async def get_book_logs(
     logs = list(reversed(result.data or []))
     
     return {"logs": logs, "count": len(logs)}
+
+@router.get("/chunks/{chunk_id}")
+async def get_chunk_by_id(
+    chunk_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get a single chunk by ID with parent context
+    
+    Returns:
+    - Child chunk details (text, metadata)
+    - Parent chunk details (full context)
+    - Book information
+    """
+    supabase = get_supabase_admin_client()
+    user_id = current_user["id"]
+    
+    # Get child chunk with parent and book info
+    result = supabase.table("child_chunks").select(
+        """
+        id,
+        text,
+        parent_id,
+        book_id,
+        paragraph_index,
+        page_number,
+        created_at,
+        parent_chunks(
+            id,
+            full_text,
+            chapter_title,
+            section_title,
+            topic_labels,
+            concise_summary
+        ),
+        books(
+            id,
+            title,
+            author
+        )
+        """
+    ).eq("id", chunk_id).single().execute()
+    
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    
+    chunk_data = result.data
+    
+    # Check if user has access to this book
+    access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", chunk_data.get("book_id")).eq("is_visible", True).execute()
+    
+    if not access_check.data and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied to this chunk")
+    
+    # Format response
+    parent = chunk_data.get("parent_chunks")
+    book = chunk_data.get("books")
+    
+    return {
+        "chunk": {
+            "id": chunk_data.get("id"),
+            "text": chunk_data.get("text"),
+            "paragraph_index": chunk_data.get("paragraph_index"),
+            "page_number": chunk_data.get("page_number"),
+            "parent_context": {
+                "id": parent.get("id") if parent else None,
+                "full_text": parent.get("full_text") if parent else None,
+                "chapter_title": parent.get("chapter_title") if parent else None,
+                "section_title": parent.get("section_title") if parent else None,
+                "topic_labels": parent.get("topic_labels") if parent else None,
+                "concise_summary": parent.get("concise_summary") if parent else None
+            } if parent else None,
+            "book": {
+                "id": book.get("id") if book else None,
+                "title": book.get("title") if book else None,
+                "author": book.get("author") if book else None
+            } if book else None
+        }
+    }

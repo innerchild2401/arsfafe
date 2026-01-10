@@ -3,29 +3,34 @@
 import { useState } from 'react'
 
 interface CitationTooltipProps {
-  refNumber: number
-  text: string
-  source?: string
-  chunkId?: string
-  pageNumber?: number
-  onCitationClick?: (chunkId?: string, pageNumber?: number) => void
+  persistentId: string  // e.g., "#chk_a1b2c3d4"
+  chunkText: string  // Truncated chunk text for hover preview
+  source?: string  // Book, chapter, section info
+  chunkId?: string  // UUID of the chunk (for fetching full data)
+  onCitationClick?: (chunkId: string) => void
 }
 
 export default function CitationTooltip({ 
-  refNumber, 
-  text, 
+  persistentId, 
+  chunkText, 
   source,
   chunkId,
-  pageNumber,
   onCitationClick 
 }: CitationTooltipProps) {
   const [isOpen, setIsOpen] = useState(false)
 
-  const handleClick = () => {
-    if (onCitationClick && (chunkId || pageNumber)) {
-      onCitationClick(chunkId, pageNumber)
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (onCitationClick && chunkId) {
+      onCitationClick(chunkId)
     }
   }
+
+  // Truncate text for hover preview (max 200 chars)
+  const truncatedText = chunkText.length > 200 
+    ? chunkText.substring(0, 200) + '...' 
+    : chunkText
 
   return (
     <span className="relative inline-block">
@@ -33,40 +38,41 @@ export default function CitationTooltip({
         onClick={handleClick}
         onMouseEnter={() => setIsOpen(true)}
         onMouseLeave={() => setIsOpen(false)}
-        className={`inline-flex items-center px-1.5 py-0.5 mx-0.5 text-xs font-mono border border-violet-500/30 text-violet-400 rounded transition-colors ${
-          chunkId || pageNumber 
-            ? 'cursor-pointer hover:bg-violet-500/20 hover:border-violet-500/50' 
-            : 'cursor-default'
+        className={`inline-flex items-center px-1.5 py-0.5 mx-0.5 text-xs font-mono border border-emerald-500/30 text-emerald-400 rounded transition-colors ${
+          chunkId 
+            ? 'cursor-pointer hover:bg-emerald-500/20 hover:border-emerald-500/50' 
+            : 'cursor-default opacity-60'
         }`}
         style={{
           background: 'transparent',
-          boxShadow: '0 0 5px rgba(139, 92, 246, 0.3)'
+          boxShadow: '0 0 8px rgba(16, 185, 129, 0.2)'
         }}
       >
-        [Ref: {refNumber}]
+        {persistentId}
       </button>
       
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 w-80 max-w-sm z-50">
-          <div className="bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl p-4">
-            <div className="text-xs font-mono text-violet-400 mb-2">
-              Reference {refNumber}
+        <div className="absolute bottom-full left-0 mb-2 w-80 max-w-sm z-50 pointer-events-none">
+          <div className="bg-zinc-900/98 backdrop-blur-md border border-zinc-700/50 rounded-lg shadow-2xl p-4">
+            <div className="text-xs font-mono text-emerald-400 mb-2 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              {persistentId}
             </div>
-            <p className="text-sm text-zinc-200 leading-relaxed line-clamp-4">
-              {text}
+            <p className="text-sm text-zinc-200 leading-relaxed line-clamp-5 font-serif">
+              {truncatedText}
             </p>
             {source && (
-              <div className="mt-2 text-xs text-zinc-400 font-mono">
+              <div className="mt-2 text-xs text-zinc-400 font-mono border-t border-zinc-800 pt-2">
                 {source}
               </div>
             )}
-            {(chunkId || pageNumber) && (
+            {chunkId && (
               <div className="mt-2 text-xs text-emerald-400 font-mono">
-                Click to view source
+                Click to view full context →
               </div>
             )}
             {/* Arrow */}
-            <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-zinc-700" />
+            <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-zinc-700/50" />
           </div>
         </div>
       )}

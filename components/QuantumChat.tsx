@@ -6,11 +6,14 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { getBackendUrl } from '@/lib/api'
 import ZorxidoOrb from './ZorxidoOrb'
 import CitationTooltip from './CitationTooltip'
+import ChunkViewerPanel from './ChunkViewerPanel'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
   sources?: string[]
+  retrieved_chunks?: string[]  // Chunk UUIDs
+  chunk_map?: Record<string, string>  // persistent_id -> chunk_uuid mapping
   timestamp?: Date
 }
 
@@ -19,11 +22,35 @@ interface QuantumChatProps {
   books: any[]
 }
 
+interface ChunkData {
+  id: string
+  text: string
+  paragraph_index: number | null
+  page_number: number | null
+  parent_context: {
+    id: string
+    full_text: string
+    chapter_title: string | null
+    section_title: string | null
+    topic_labels: string[] | null
+    concise_summary: string | null
+  } | null
+  book: {
+    id: string
+    title: string
+    author: string | null
+  } | null
+}
+
 export default function QuantumChat({ selectedBookId, books }: QuantumChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null)
+  const [chunkData, setChunkData] = useState<ChunkData | null>(null)
+  const [chunkLoading, setChunkLoading] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
@@ -62,6 +89,8 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
             role: msg.role,
             content: msg.content,
             sources: msg.sources,
+            retrieved_chunks: msg.retrieved_chunks || [],
+            chunk_map: msg.chunk_map || {},  // Load chunk_map from stored messages if available
             timestamp: new Date(msg.created_at)
           }))
           setMessages(formattedMessages.reverse())
@@ -124,6 +153,8 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
         role: 'assistant',
         content: data.response,
         sources: data.sources,
+        retrieved_chunks: data.retrieved_chunks || [],
+        chunk_map: data.chunk_map || {},  // Store chunk_map for citation mapping
         timestamp: new Date()
       }
 
@@ -137,31 +168,121 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
     }
   }
 
-  // Parse citations from content (format: [Ref: 1], [Ref: 2], etc.)
-  const parseCitations = (content: string, sources?: string[]): React.ReactNode[] => {
-    const parts: React.ReactNode[] = []
-    const citationRegex = /\[Ref:\s*(\d+)\]/g
-    let lastIndex = 0
-    let match
+  // Fetch chunk data by ID
+  const fetchChunkData = async (chunkId: string) => {
+    try {
+      setChunkLoading(true)
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        throw new Error('Not authenticated')
+      }
 
+      const backendUrl = getBackendUrl()
+      // Use the chunks endpoint under books router
+      const response = await fetch(`${backendUrl}/api/books/chunks/${chunkId}`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch chunk')
+      }
+
+      const data = await response.json()
+      setChunkData(data.chunk)
+      setPanelOpen(true)
+    } catch (error: any) {
+      console.error('Error fetching chunk:', error)
+      setError(error.message || 'Failed to load chunk')
+    } finally {
+      setChunkLoading(false)
+    }
+  }
+
+  // Handle citation click
+  const handleCitationClick = (chunkId: string) => {
+    setSelectedChunkId(chunkId)
+    fetchChunkData(chunkId)
+  }
+
+  // Close panel
+  const handleClosePanel = () => {
+    setPanelOpen(false)
+    setSelectedChunkId(null)
+    setChunkData(null)
+  }
+
+  // Parse citations from content (format: #chk_xxxx)
+  const parseCitations = (
+    content: string, 
+    message: Message,
+    sources?: string[]
+  ): React.ReactNode[] => {
+    const parts: React.ReactNode[] = []
+    // Match #chk_ followed by 8 hex characters (case-insensitive, with word boundary check)
+    // Use a non-global regex first to find all matches, then process them
+    const citationMatches: Array<{ match: string; index: number }> = []
+    const citationRegex = /#chk_[a-f0-9]{8}/gi
+    let match
+    
+    // Find all matches first
     while ((match = citationRegex.exec(content)) !== null) {
+      citationMatches.push({ match: match[0], index: match.index })
+    }
+    
+    // Reset regex for processing
+    citationRegex.lastIndex = 0
+    
+    // Process each citation
+    let lastIndex = 0
+    for (const { match: citationText, index } of citationMatches) {
       // Add text before citation
-      if (match.index > lastIndex) {
-        parts.push(content.substring(lastIndex, match.index))
+      if (index > lastIndex) {
+        parts.push(content.substring(lastIndex, index))
       }
       
-      // Add citation tooltip
-      const refNum = parseInt(match[1])
-      const sourceText = sources && sources[refNum - 1] ? sources[refNum - 1] : 'Source not available'
+      // Get persistent ID and find corresponding chunk UUID
+      const persistentId = citationText
+      const chunkMap = message.chunk_map || {}
+      const chunkId = chunkMap[persistentId]
+      
+      // Extract chunk text snippet from content (text after citation until next citation or ~200 chars)
+      const citationEnd = index + citationText.length
+      const remainingMatches = citationMatches.filter(m => m.index > index)
+      const nextCitation = remainingMatches.length > 0 ? remainingMatches[0] : null
+      const nextCitationIndex = nextCitation ? nextCitation.index : undefined
+      const textEnd = nextCitationIndex !== undefined
+        ? Math.min(nextCitationIndex, citationEnd + 200)
+        : Math.min(citationEnd + 200, content.length)
+      
+      // Get the chunk text snippet
+      let chunkTextSnippet = content.substring(citationEnd, textEnd).trim()
+      // Clean up: remove any citation IDs that appear, remove extra whitespace
+      chunkTextSnippet = chunkTextSnippet.replace(/#chk_[a-f0-9]{8}/gi, '').trim()
+      chunkTextSnippet = chunkTextSnippet.replace(/\s+/g, ' ')
+      // Truncate to 200 chars for preview
+      if (chunkTextSnippet.length > 200) {
+        chunkTextSnippet = chunkTextSnippet.substring(0, 200) + '...'
+      }
+      
+      // Use snippet if available, otherwise generic message
+      const chunkText = chunkTextSnippet || 'Click to view full chunk context and source information.'
+      const sourceText = sources && sources.length > 0 ? sources.join(', ') : 'Source available'
+      
       parts.push(
         <CitationTooltip
-          key={`citation-${match.index}`}
-          refNumber={refNum}
-          text={sourceText}
+          key={`citation-${index}`}
+          persistentId={persistentId}
+          chunkText={chunkText}
+          source={sourceText}
+          chunkId={chunkId}
+          onCitationClick={chunkId ? handleCitationClick : undefined}
         />
       )
       
-      lastIndex = match.index + match[0].length
+      lastIndex = index + citationText.length
     }
     
     // Add remaining text
@@ -173,59 +294,61 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
   }
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      {/* Messages Area - Thread Style */}
-      <div className="flex-1 overflow-y-auto overscroll-contain">
-        <div className="max-w-4xl mx-auto px-6 py-8">
-          {messages.length === 0 && (
-            <div className="flex items-center justify-center min-h-[60vh]">
-              <div className="text-center max-w-lg">
-                <ZorxidoOrb size="lg" />
-                <h2 className="mt-6 text-xl font-semibold text-zinc-50 mb-2">How can I help you today?</h2>
-                <p className="text-sm text-zinc-400">I&apos;m Zorxido, your AI assistant. Ask me anything about your books.</p>
+    <div className="flex flex-1 h-full bg-zinc-950 overflow-hidden">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Messages Area - Thread Style */}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          <div className="max-w-4xl mx-auto px-6 py-8">
+            {messages.length === 0 && (
+              <div className="flex items-center justify-center min-h-[60vh]">
+                <div className="text-center max-w-lg">
+                  <ZorxidoOrb size="lg" />
+                  <h2 className="mt-6 text-xl font-semibold text-zinc-50 mb-2">How can I help you today?</h2>
+                  <p className="text-sm text-zinc-400">I&apos;m Zorxido, your AI assistant. Ask me anything about your books.</p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="space-y-6">
-            {messages.map((message, index) => (
-              <div
-                key={index}
-                className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {message.role === 'assistant' && (
-                  <div className="flex-shrink-0">
-                    <ZorxidoOrb isActive={index === messages.length - 1 && loading} size="md" />
-                  </div>
-                )}
-                
-                <div className={`flex-1 ${message.role === 'user' ? 'max-w-[75%]' : 'max-w-[85%]'}`}>
-                  {message.role === 'user' ? (
-                    <div className="text-zinc-200 text-sm leading-relaxed">
-                      {message.content}
+            <div className="space-y-6">
+              {messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="flex-shrink-0">
+                      <ZorxidoOrb isActive={index === messages.length - 1 && loading} size="md" />
                     </div>
-                  ) : (
-                    <div className="relative">
-                      {/* Vertical accent line */}
-                      <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-500/50" />
-                      
-                      {/* Content */}
-                      <div className="ml-4 pl-4 bg-zinc-900/50 rounded-lg p-4 border-l-2 border-emerald-500/30">
-                        <div className="font-serif text-zinc-100 text-sm leading-relaxed whitespace-pre-wrap">
-                          {parseCitations(message.content, message.sources)}
+                  )}
+                  
+                  <div className={`flex-1 ${message.role === 'user' ? 'max-w-[75%]' : 'max-w-[85%]'}`}>
+                    {message.role === 'user' ? (
+                      <div className="text-zinc-200 text-sm leading-relaxed">
+                        {message.content}
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        {/* Vertical accent line */}
+                        <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-500/50" />
+                        
+                        {/* Content */}
+                        <div className="ml-4 pl-4 bg-zinc-900/50 rounded-lg p-4 border-l-2 border-emerald-500/30">
+                          <div className="font-serif text-zinc-100 text-sm leading-relaxed whitespace-pre-wrap">
+                            {parseCitations(message.content, message, message.sources)}
+                          </div>
                         </div>
                       </div>
+                    )}
+                  </div>
+
+                  {message.role === 'user' && (
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
+                      <span className="text-zinc-400 text-xs font-medium">U</span>
                     </div>
                   )}
                 </div>
-
-                {message.role === 'user' && (
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
-                    <span className="text-zinc-400 text-xs font-medium">U</span>
-                  </div>
-                )}
-              </div>
-            ))}
+              ))}
 
             {loading && (
               <div className="flex gap-4 justify-start">
@@ -252,58 +375,79 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
               </div>
             )}
 
-            <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} />
+            </div>
           </div>
+        </div>
+
+        {/* Input Area - Fixed at bottom */}
+        <div className="border-t border-zinc-800 bg-zinc-900/50 px-6 py-4 flex-shrink-0">
+          <form onSubmit={handleSend} className="max-w-4xl mx-auto">
+            <div className="relative flex items-end gap-3">
+              <textarea
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  const target = e.target as HTMLTextAreaElement
+                  target.style.height = 'auto'
+                  target.style.height = `${Math.min(target.scrollHeight, 200)}px`
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSend(e as any)
+                  }
+                }}
+                placeholder="Message Zorxido..."
+                disabled={loading || books.length === 0}
+                rows={1}
+                className="flex-1 resize-none bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto' }}
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim() || books.length === 0}
+                className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-100 text-zinc-900 hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                aria-label="Send message"
+              >
+                {loading ? (
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-center text-zinc-500">
+              Zorxido can make mistakes. Check important information.
+            </p>
+          </form>
         </div>
       </div>
 
-      {/* Input Area - Fixed at bottom */}
-      <div className="border-t border-zinc-800 bg-zinc-900/50 px-6 py-4 flex-shrink-0">
-        <form onSubmit={handleSend} className="max-w-4xl mx-auto">
-          <div className="relative flex items-end gap-3">
-            <textarea
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                const target = e.target as HTMLTextAreaElement
-                target.style.height = 'auto'
-                target.style.height = `${Math.min(target.scrollHeight, 200)}px`
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend(e as any)
-                }
-              }}
-              placeholder="Message Zorxido..."
-              disabled={loading || books.length === 0}
-              rows={1}
-              className="flex-1 resize-none bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto' }}
+      {/* Right Panel - Chunk Viewer (Slides in from right) */}
+      {panelOpen && (
+        <>
+          {/* Mobile Overlay */}
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-300"
+            onClick={handleClosePanel}
+          />
+          {/* Panel - Slide in from right animation */}
+          <div className="fixed md:relative inset-y-0 right-0 z-50 md:z-auto transform transition-transform duration-300 ease-out translate-x-0">
+            <ChunkViewerPanel
+              chunkId={selectedChunkId}
+              onClose={handleClosePanel}
+              chunkData={chunkData}
+              loading={chunkLoading}
             />
-            <button
-              type="submit"
-              disabled={loading || !input.trim() || books.length === 0}
-              className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-100 text-zinc-900 hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              aria-label="Send message"
-            >
-              {loading ? (
-                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              )}
-            </button>
           </div>
-          <p className="mt-2 text-xs text-center text-zinc-500">
-            Zorxido can make mistakes. Check important information.
-          </p>
-        </form>
-      </div>
+        </>
+      )}
     </div>
   )
 }
