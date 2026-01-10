@@ -10,6 +10,6 @@ ALTER TABLE books ADD COLUMN IF NOT EXISTS global_summary TEXT;
 -- Add concise_summary to parent_chunks (chapter summaries)
 ALTER TABLE parent_chunks ADD COLUMN IF NOT EXISTS concise_summary TEXT;
 
--- Index for faster lookup
-CREATE INDEX IF NOT EXISTS idx_books_global_summary ON books(book_id) WHERE global_summary IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_parent_chunks_concise_summary ON parent_chunks(book_id) WHERE concise_summary IS NOT NULL;
+-- Index for faster lookup (partial indexes for books/sections with summaries)
+CREATE INDEX IF NOT EXISTS idx_books_global_summary ON books(id) WHERE global_summary IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_parent_chunks_concise_summary ON parent_chunks(id) WHERE concise_summary IS NOT NULL;
