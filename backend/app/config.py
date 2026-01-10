@@ -38,7 +38,12 @@ class Settings(BaseSettings):
     
     # LLM Models
     structure_model: str = "gpt-4o-mini"
-    chat_model: str = "gpt-4o-mini"
+    chat_model: str = "gpt-4o-mini"  # Fast, cheap for standard queries
+    reasoning_model: str = "gpt-4o"  # Deep reasoning for complex queries (Path C)
     labeling_model: str = "gpt-4o-mini"
+    
+    # DeepSeek Reasoning (alternative to GPT-4o)
+    # deepseek_api_key: str = ""
+    # deepseek_reasoning_model: str = "deepseek-reasoner"  # Uncomment if using DeepSeek
     
 settings = Settings()

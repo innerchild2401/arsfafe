@@ -10,7 +10,9 @@ from openai import OpenAI
 from app.database import get_supabase_client, get_supabase_admin_client
 from app.dependencies import get_current_user, check_usage_limits
 from app.services.embedding_service import generate_embedding
+from app.services.corrections_service import get_relevant_corrections, build_corrections_context
 from app.config import settings
+import hashlib
 
 router = APIRouter()
 
@@ -95,11 +97,23 @@ async def chat(
             tokens_used=None
         )
     
-    # TWO-PATH BRAIN STRATEGY
-    # Path A (Specific Query): Vector Search for detailed questions
+    # THREE-PATH BRAIN STRATEGY
+    # Path A (Specific Query): Hybrid Search (Vector + Keyword) for detailed questions
     # Path B (Global Query): Pre-computed summaries for general questions
+    # Path C (Deep Reasoner): Reasoning model for complex analysis
     
     user_message_lower = chat_message.message.lower()
+    
+    # Detect deep reasoning intent (Analyze, Compare, Why, Connect)
+    reasoning_intent_keywords = [
+        "analyze", "analyse", "analysis", "compare", "comparison", "contrast",
+        "why", "how does", "how is", "how are", "what causes", "what leads to",
+        "connect", "connection", "relationship", "relate", "correlate",
+        "explain why", "what is the relationship", "what is the connection",
+        "difference between", "similarities between", "distinguish"
+    ]
+    
+    is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
     
     # Detect global intent (summarize, overview, "what is this book about")
     global_intent_keywords = [
@@ -108,7 +122,7 @@ async def chat(
         "what does this book cover", "what is the book about", "book summary"
     ]
     
-    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords)
+    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query
     
     # PATH B: Global Query - Use pre-computed summaries
     if is_global_query and chat_message.book_id and len(book_ids) == 1:
@@ -294,39 +308,60 @@ Present this in a clear, informative format."""
         match_threshold = 0.5 if is_global_query else 0.7
         match_count = 10 if is_global_query else 5
         
-        # Search for relevant chunks using vector search
+        # Search for relevant chunks using hybrid search (vector + keyword)
         chunks = []
         try:
-        chunks_result = supabase.rpc(
-            "match_child_chunks",
-            {
-                "query_embedding": query_embedding,
-                "match_threshold": match_threshold,
-                "match_count": match_count,
-                "book_ids": book_ids
-            }
-        ).execute()
-        
-        chunks = chunks_result.data if chunks_result.data else []
-        print(f"🔍 Vector search found {len(chunks)} chunks with threshold {match_threshold}")
-        
-        # If no chunks found with threshold, try with lower threshold as fallback
-        if not chunks and match_threshold > 0.3:
-            print(f"⚠️ No chunks found with threshold {match_threshold}, trying lower threshold 0.3...")
-            chunks_result = supabase.rpc(
-                "match_child_chunks",
-                {
-                    "query_embedding": query_embedding,
-                    "match_threshold": 0.3,  # Very low threshold - get any chunks
-                    "match_count": match_count,
-                    "book_ids": book_ids
-                }
-            ).execute()
+            # Try hybrid search first (if available)
+            try:
+                chunks_result = supabase.rpc(
+                    "match_child_chunks_hybrid",
+                    {
+                        "query_embedding": query_embedding,
+                        "query_text": chat_message.message,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids,
+                        "keyword_weight": 0.5,
+                        "vector_weight": 0.5
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                print(f"🔍 Hybrid search found {len(chunks)} chunks with threshold {match_threshold}")
+            except Exception as hybrid_error:
+                # Fallback to pure vector search if hybrid not available
+                print(f"⚠️ Hybrid search not available, using vector search: {str(hybrid_error)}")
+                chunks_result = supabase.rpc(
+                    "match_child_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                print(f"🔍 Vector search found {len(chunks)} chunks with threshold {match_threshold}")
             
-            chunks = chunks_result.data if chunks_result.data else []
-            print(f"🔍 Fallback search found {len(chunks)} chunks with threshold 0.3")
+            # If no chunks found with threshold, try with lower threshold as fallback
+            if not chunks and match_threshold > 0.3:
+                print(f"⚠️ No chunks found with threshold {match_threshold}, trying lower threshold 0.3...")
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks",
+                        {
+                            "query_embedding": query_embedding,
+                            "match_threshold": 0.3,  # Very low threshold - get any chunks
+                            "match_count": match_count,
+                            "book_ids": book_ids
+                        }
+                    ).execute()
+                    
+                    chunks = chunks_result.data if chunks_result.data else []
+                    print(f"🔍 Fallback search found {len(chunks)} chunks with threshold 0.3")
+                except Exception as fallback_error:
+                    print(f"⚠️ Fallback search also failed: {str(fallback_error)}")
         
-    except Exception as e:
+        except Exception as e:
         # Fallback: get chunks without vector search (any chunks from the book)
         print(f"❌ Vector search failed: {str(e)}")
         print(f"⚠️ Falling back to simple chunk retrieval...")
