@@ -602,37 +602,63 @@ className="translate-x-full md:translate-x-0"
 </div>
 ```
 
-### 4. Floating Action Button (FAB) for Chat
+### 4. Floating Action Button (FAB) for Chat (`components/ChatFAB.tsx`)
 
-**Status**: ⚠️ Not yet implemented (Future Enhancement)
+**Status**: ✅ Implemented
 
-**Planned Behavior**:
+**Behavior**:
 - **Position**: `fixed bottom-20 right-4` (above BottomNav, 80px from bottom)
 - **Size**: `h-14 w-14` (56px × 56px)
 - **Style**: `bg-emerald-500 rounded-full shadow-lg shadow-emerald-500/20`
-- **Icon**: Sparkles or Message icon
-- **Visibility**: Only on document/chunk pages (`md:hidden` - mobile only)
-- **Interaction**: Opens chat drawer/sheet (85vh height)
+- **Icon**: Sparkles icon (`lucide-react`)
+- **Visibility**: Only on knowledge-center page (`md:hidden` - mobile only)
+- **Interaction**: Opens chat drawer (85vh height)
 - **Z-index**: `z-50` (same as BottomNav)
+- **Hover**: `hover:bg-emerald-600` transition
 
-**Planned Code Pattern**:
+**Code Pattern**:
 ```tsx
-{/* FAB - Mobile Only, on Document Pages */}
-<button className="md:hidden fixed bottom-20 right-4 h-14 w-14 bg-emerald-500 rounded-full z-50 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-  <SparklesIcon className="w-6 h-6 text-zinc-950" />
+<button
+  onClick={() => setIsOpen(true)}
+  className="md:hidden fixed bottom-20 right-4 h-14 w-14 bg-emerald-500 rounded-full z-50 flex items-center justify-center shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-colors"
+  aria-label="Open chat"
+>
+  <Sparkles className="w-6 h-6 text-zinc-950" />
 </button>
 ```
 
-### 5. Chat Drawer (Future Enhancement)
+### 5. Chat Drawer (`components/ChatFAB.tsx`)
 
-**Status**: ⚠️ Not yet implemented
+**Status**: ✅ Implemented
 
-**Planned Behavior**:
-- **Component**: Shadcn UI Drawer component
-- **Height**: `85vh` (leaving top 15% visible for context)
-- **Interaction**: Opens from FAB tap
-- **Citation Click**: When citation is tapped, drawer minimizes to small bar at bottom
-- **Style**: Glassmorphism with backdrop blur
+**Behavior**:
+- **Component**: Shadcn UI Drawer component (using `vaul`)
+- **Height**: `max-h-[85vh]` (leaving top 15% visible for context)
+- **Interaction**: Opens from FAB tap, closes via close button or backdrop click
+- **Content**: Full QuantumChat component with all functionality
+- **Style**: `bg-zinc-950 border-t border-zinc-800` with backdrop blur
+- **Header**: Shows book title/description with close button
+- **Scroll**: Chat content scrollable within drawer
+
+**Code Pattern**:
+```tsx
+<Drawer open={isOpen} onOpenChange={setIsOpen}>
+  <DrawerContent className="max-h-[85vh] bg-zinc-950 border-t border-zinc-800">
+    <DrawerHeader>
+      <DrawerTitle>Quantum Chat</DrawerTitle>
+      <DrawerDescription>{bookTitle}</DrawerDescription>
+    </DrawerHeader>
+    <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 100px)' }}>
+      <QuantumChat selectedBookId={selectedBookId} books={books} />
+    </div>
+  </DrawerContent>
+</Drawer>
+```
+
+**Integration**:
+- **Knowledge Center Page**: Desktop shows full chat, mobile shows FAB
+- **Desktop**: `hidden md:block` for QuantumChat
+- **Mobile**: FAB visible, drawer opens on tap
 
 ---
 
@@ -681,9 +707,9 @@ className="pb-16 md:pb-0"  // Bottom padding on mobile (for BottomNav), none on 
 ## Future Enhancements
 
 ### Still Needed
-- **FAB**: Floating Action Button for chat on document pages (mobile only)
-- **Chat Drawer**: Sheet/Drawer component for mobile chat interface
 - **Segmented Control**: Source PDF vs Parsed Text toggle on reader pages
+- **Citation Minimize**: When citation is tapped in mobile drawer, minimize drawer to small bar at bottom
+- **FAB on Other Pages**: Add FAB to chunks/document pages (currently only on knowledge-center)
 
 ### Responsive Improvements
 - **Tablet Optimization**: Better use of medium breakpoint (768px-1024px)
