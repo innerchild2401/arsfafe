@@ -71,7 +71,7 @@ export default function AppShell({ children }: AppShellProps) {
       {/* Desktop Rail Navigation - Hidden on Mobile */}
       <aside
         className={cn(
-          "hidden md:flex h-full z-50 bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col",
+          "hidden md:flex md:flex-col h-full z-50 bg-card border-r border-border transition-all duration-300 ease-in-out",
           sidebarExpanded ? 'w-64' : 'w-16'
         )}
         onMouseEnter={() => setSidebarExpanded(true)}
