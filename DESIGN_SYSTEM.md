@@ -31,7 +31,7 @@ This document describes the design elements, responsive patterns, and rendering 
 - **Emerald-500**: Ready, Success, Primary actions, "Zorxido" avatar glow
 - **Amber-500**: Pending approval, Processing, Warning states (with pulse animation)
 - **Rose-500**: Error, Suspended, Destructive actions
-- **Violet-500**: Admin features, Special states
+- **Violet-500**: Planning/Synthesis, Action artifacts (Path D), Composer view, Artifact borders
 
 ### Text Colors
 - **Primary Text**: `text-zinc-50` (high contrast)
@@ -602,6 +602,67 @@ className="translate-x-full md:translate-x-0"
 </div>
 ```
 
+### 4. Path D Artifacts (Action Planner) - Desktop Workbench
+
+**Implementation**: ✅ Implemented
+
+**Desktop**: Polymorphic Canvas with View Switcher
+
+**Components**:
+- **ViewSwitcher**: Segmented control `[Inspector | Composer]` for toggling between chunk view and artifact view
+- **ArtifactRenderer**: Renders structured artifacts (checklist, notebook, script) based on `artifact_type`
+- **ChunkViewerPanel**: Updated to support polymorphic canvas with artifact rendering
+
+**Artifact Types**:
+1. **Checklist** (Parenting/Habits):
+   - Timeline view with times (e.g., "7:00 PM: Bedtime")
+   - Interactive checkboxes (large, touch-friendly)
+   - Script cards with "What to Say" vs "What to Do"
+   - Border: `border-l-4 border-violet-500`
+   - Typography: JetBrains Mono for timestamps/steps
+
+2. **Notebook** (Physics/Math):
+   - Jupyter-style cells (markdown, code, output)
+   - LaTeX rendering support (via KaTeX)
+   - Code blocks with syntax highlighting
+   - Border: `border-l-4 border-violet-500`
+   - Colors: `text-emerald-400` for code (signal color for verified truth)
+
+3. **Script** (Conversational):
+   - Scene-based layout with context
+   - Speaker labels (Parent, Child, etc.)
+   - Dialogue text and action instructions
+   - Border: `border-l-4 border-violet-500`
+
+**Visual Style**:
+- **Container**: `bg-zinc-900` with `border-l-4 border-violet-500` (Violet signal color)
+- **Header**: Shows artifact title with icon (Sparkles for checklist, Code for notebook, FileText for script)
+- **Variables**: Displayed as small badges if present (e.g., "Age: 2 years")
+- **Citations**: Footer with source chunk IDs (`#chk_xxxx`)
+
+**Code Pattern**:
+```tsx
+<ChunkViewerPanel
+  chunkId={selectedChunkId}
+  artifact={message.artifact}
+  // ... other props
+/>
+
+// Inside ChunkViewerPanel:
+{artifact && (
+  <ViewSwitcher view={view} onViewChange={setView} />
+)}
+{view === 'composer' && artifact ? (
+  <ArtifactRenderer artifact={artifact} />
+) : (
+  <ChunkInspector chunkData={chunkData} />
+)}
+```
+
+**Mobile**: Artifacts appear in chat messages as "View Artifact" cards
+- Card shows artifact title and type
+- Tapping card opens the Workbench panel with artifact view
+
 ### 4. Floating Action Button (FAB) for Chat (`components/ChatFAB.tsx`)
 
 **Status**: ✅ Implemented
@@ -704,12 +765,48 @@ className="pb-16 md:pb-0"  // Bottom padding on mobile (for BottomNav), none on 
 
 ---
 
+## Path D: Action Planner Architecture
+
+### Overview
+Path D (Action Planner) transforms the system from a search engine into an implementation engine. It generates structured artifacts (checklists, notebooks, scripts) instead of just text responses.
+
+### Backend Architecture
+- **Trigger Keywords**: "plan", "schedule", "how to", "solve", "simulate", "script", "routine", "checklist", "steps", "create a", "make a", "implement", "methodology", "framework", "process", "procedure", "workflow"
+- **Model**: `gpt-4o` (reasoning model) for structured JSON generation
+- **Output**: JSON artifact with `artifact_type`, `title`, `content`, `citations`, `variables`
+- **Storage**: Artifacts stored in `chat_messages.artifact` JSONB column
+
+### Frontend Architecture
+- **Desktop**: Polymorphic Canvas with View Switcher (Inspector | Composer)
+- **Mobile**: "View Artifact" card in chat messages, opens Workbench panel
+- **Rendering**: `ArtifactRenderer` component handles all artifact types
+- **Signal Color**: Violet-500 for all artifact-related UI elements
+
+### Artifact Structure
+```typescript
+interface Artifact {
+  artifact_type: 'checklist' | 'notebook' | 'script'
+  title: string
+  content: {
+    steps?: ArtifactStep[]      // For checklist
+    cells?: ArtifactCell[]       // For notebook
+    scenes?: ArtifactScene[]     // For script
+  }
+  citations?: string[]           // Persistent chunk IDs (#chk_xxxx)
+  variables?: Record<string, string>  // User variables (e.g., age, duration)
+}
+```
+
+---
+
 ## Future Enhancements
 
 ### Still Needed
-- **Segmented Control**: Source PDF vs Parsed Text toggle on reader pages
+- **Mobile Reader View**: Add Source/Text/Plan toggle for mobile reader pages
 - **Citation Minimize**: When citation is tapped in mobile drawer, minimize drawer to small bar at bottom
 - **FAB on Other Pages**: Add FAB to chunks/document pages (currently only on knowledge-center)
+- **Diff Interaction**: Selection-based refinement with floating toolbar (Path D enhancement)
+- **Artifact Persistence**: Store artifact state changes (checked steps, modified content)
 
 ### Responsive Improvements
 - **Tablet Optimization**: Better use of medium breakpoint (768px-1024px)
