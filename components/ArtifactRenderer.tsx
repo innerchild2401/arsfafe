@@ -144,6 +144,8 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine,
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [editingVariable, setEditingVariable] = useState<string | null>(null)
   const [variableValues, setVariableValues] = useState<Record<string, string>>(artifact.variables || {})
+  const [updatedStepIds, setUpdatedStepIds] = useState<Set<string>>(new Set())  // Track updated steps for green flash
+  const [updatedVariableKeys, setUpdatedVariableKeys] = useState<Set<string>>(new Set())  // Track updated variables
 
   const handleStepClick = (stepId: string) => {
     setSelectedStepId(selectedStepId === stepId ? null : stepId)

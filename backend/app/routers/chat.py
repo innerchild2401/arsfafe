@@ -1347,6 +1347,332 @@ async def save_correction(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save correction: {str(e)}")
 
+@router.post("/refine-artifact")
+async def refine_artifact(
+    refinement: ArtifactRefinementRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Phase 2: Refine artifact (variables or steps)
+    Handles both contextual variable updates and selection-based step refinement
+    """
+    from app.services.corrections_service import get_relevant_corrections, build_corrections_context
+    
+    supabase = get_supabase_admin_client()
+    user_id = current_user["id"]
+    
+    try:
+        # Retrieve the original message with artifact
+        message_result = supabase.table("chat_messages").select("*").eq("id", refinement.message_id).eq("user_id", user_id).single().execute()
+        
+        if not message_result.data:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        original_message = message_result.data
+        original_artifact = original_message.get("artifact")
+        
+        if not original_artifact:
+            raise HTTPException(status_code=400, detail="Message does not contain an artifact")
+        
+        book_id = original_message.get("book_id")
+        
+        # Get user's accessible books
+        if book_id:
+            book_ids = [book_id]
+        else:
+            access_result = supabase.table("user_book_access").select("book_id").eq("user_id", user_id).eq("is_visible", True).execute()
+            book_ids = [access["book_id"] for access in access_result.data]
+        
+        if not book_ids:
+            raise HTTPException(status_code=400, detail="No books available")
+        
+        # Get conversation history for context
+        conversation_history = get_conversation_history(supabase, user_id, book_id, limit=20)
+        conversation_context = build_conversation_context(conversation_history)
+        
+        # Find the original user message that triggered this artifact
+        original_user_message = ""
+        for msg in reversed(conversation_history):  # Search from most recent
+            if msg.get("role") == "user" and msg.get("id") != refinement.message_id:
+                original_user_message = msg.get("content", "")
+                break
+        
+        # If not found in history, try to get from message before this one
+        if not original_user_message:
+            # Get the user message that came before this assistant message
+            prev_message_result = supabase.table("chat_messages").select("*").eq("user_id", user_id).eq("book_id", book_id).lt("created_at", original_message.get("created_at")).order("created_at", desc=True).limit(1).execute()
+            if prev_message_result.data:
+                prev_msg = prev_message_result.data[0]
+                if prev_msg.get("role") == "user":
+                    original_user_message = prev_msg.get("content", "")
+        
+        client = OpenAI(api_key=settings.openai_api_key)
+        
+        # Handle variable refinement
+        if refinement.refinement_type == "variable" and refinement.variable_key and refinement.variable_value:
+            # Update variables in artifact
+            updated_variables = original_artifact.get("variables", {}).copy()
+            updated_variables[refinement.variable_key] = refinement.variable_value
+            
+            # Regenerate artifact with new variables
+            # Get original citations to retrieve chunks
+            original_citations = original_artifact.get("citations", [])
+            
+            # Extract chunk IDs from citations
+            chunk_ids = []
+            chunk_map_reverse = original_message.get("chunk_map", {}) or {}
+            for citation in original_citations:
+                chunk_id = chunk_map_reverse.get(citation)
+                if chunk_id:
+                    chunk_ids.append(chunk_id)
+            
+            # Retrieve chunks
+            chunks = []
+            if chunk_ids:
+                chunks_result = supabase.table("child_chunks").select("id, text, parent_id, book_id").in_("id", chunk_ids).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+            
+            if not chunks:
+                raise HTTPException(status_code=400, detail="Could not retrieve original chunks")
+            
+            # Enhance chunks with parent context
+            chunks = get_parent_context_for_chunks(chunks, supabase)
+            
+            # Build context
+            context_parts = []
+            retrieved_chunk_ids = []
+            
+            for chunk in chunks:
+                chunk_id = chunk.get("id")
+                chunk_text = chunk.get("context_text") or chunk.get("text", "")
+                persistent_id = generate_chunk_id(chunk_id)
+                retrieved_chunk_ids.append(chunk_id)
+                
+                chapter_title = chunk.get("chapter_title") or "Unknown Chapter"
+                section_title = chunk.get("section_title") or ""
+                context_parts.append(f"[{persistent_id}] {chapter_title}" + (f" / {section_title}" if section_title else ""))
+                context_parts.append(chunk_text)
+            
+            context_text = "\n\n".join(context_parts)
+            
+            # Get corrections
+            corrections = get_relevant_corrections(user_id, original_user_message, book_id, limit=3)
+            corrections_context = build_corrections_context(corrections) if corrections else ""
+            
+            # Build regeneration prompt with updated variables
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
+            variables_str = ", ".join([f"{k}: {v}" for k, v in updated_variables.items()])
+            
+            artifact_prompt = f"""You are an Implementation Architect. Regenerate the artifact with updated variables.
+
+{history_prefix}Original Request: {original_user_message}
+
+Updated Variables: {variables_str}
+
+Relevant Content from Book:
+{context_text}
+
+{corrections_context}
+
+Regenerate the JSON artifact with the updated variables. Keep the same artifact_type and structure, but update the content based on the new variable values.
+
+Return ONLY valid JSON with this structure:
+{{
+  "artifact_type": "{original_artifact.get('artifact_type')}",
+  "title": "...",
+  "content": {{...}},
+  "citations": {json.dumps(original_citations)},
+  "variables": {json.dumps(updated_variables)}
+}}"""
+            
+            # Regenerate artifact
+            response = client.chat.completions.create(
+                model=settings.reasoning_model,
+                messages=[
+                    {"role": "system", "content": "You are an Implementation Architect. Regenerate structured JSON artifacts with updated variables."},
+                    {"role": "user", "content": artifact_prompt}
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            
+            artifact_json_str = response.choices[0].message.content
+            tokens_used = response.usage.total_tokens if response.usage else None
+            
+            try:
+                updated_artifact = json.loads(artifact_json_str)
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=500, detail=f"Failed to parse regenerated artifact: {str(e)}")
+            
+            # Update artifact in database
+            supabase.table("chat_messages").update({
+                "artifact": updated_artifact
+            }).eq("id", refinement.message_id).execute()
+            
+            return {
+                "message": "Artifact regenerated successfully",
+                "artifact": updated_artifact,
+                "tokens_used": tokens_used
+            }
+        
+        # Handle step refinement
+        elif refinement.refinement_type == "step" and refinement.step_id and refinement.refinement_instruction:
+            # Refine specific step
+            # Get original artifact structure
+            artifact_type = original_artifact.get("artifact_type")
+            artifact_content = original_artifact.get("content", {})
+            
+            # Find the step to refine
+            if artifact_type == "checklist":
+                steps = artifact_content.get("steps", [])
+                step_to_refine = next((s for s in steps if s.get("id") == refinement.step_id), None)
+                
+                if not step_to_refine:
+                    raise HTTPException(status_code=404, detail="Step not found in artifact")
+                
+                # Get original citations for context
+                original_citations = original_artifact.get("citations", [])
+                
+                # Extract chunk IDs from citations
+                chunk_ids = []
+                chunk_map_reverse = original_message.get("chunk_map", {})
+                for citation in original_citations:
+                    chunk_id = chunk_map_reverse.get(citation)
+                    if chunk_id:
+                        chunk_ids.append(chunk_id)
+                
+                # Retrieve chunks
+                chunks = []
+                if chunk_ids:
+                    chunks_result = supabase.table("child_chunks").select("id, text, parent_id, book_id").in_("id", chunk_ids).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                
+                if not chunks:
+                    raise HTTPException(status_code=400, detail="Could not retrieve original chunks")
+                
+                # Enhance chunks with parent context
+                chunks = get_parent_context_for_chunks(chunks, supabase)
+                
+                # Build context
+                context_parts = []
+                for chunk in chunks:
+                    chunk_id = chunk.get("id")
+                    chunk_text = chunk.get("context_text") or chunk.get("text", "")
+                    persistent_id = generate_chunk_id(chunk_id)
+                    
+                    chapter_title = chunk.get("chapter_title") or "Unknown Chapter"
+                    section_title = chunk.get("section_title") or ""
+                    context_parts.append(f"[{persistent_id}] {chapter_title}" + (f" / {section_title}" if section_title else ""))
+                    context_parts.append(chunk_text)
+                
+                context_text = "\n\n".join(context_parts)
+                
+                # Build refinement prompt
+                # Find original user message (same logic as variable refinement)
+                step_refinement_user_message = ""
+                for msg in reversed(conversation_history):
+                    if msg.get("role") == "user" and msg.get("id") != refinement.message_id:
+                        step_refinement_user_message = msg.get("content", "")
+                        break
+                
+                if not step_refinement_user_message:
+                    prev_message_result = supabase.table("chat_messages").select("*").eq("user_id", user_id).eq("book_id", book_id).lt("created_at", original_message.get("created_at")).order("created_at", desc=True).limit(1).execute()
+                    if prev_message_result.data:
+                        prev_msg = prev_message_result.data[0]
+                        if prev_msg.get("role") == "user":
+                            step_refinement_user_message = prev_msg.get("content", "")
+                
+                corrections = get_relevant_corrections(user_id, step_refinement_user_message, book_id, limit=3)
+                corrections_context = build_corrections_context(corrections) if corrections else ""
+                
+                history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+                
+                artifact_prompt = f"""You are an Implementation Architect. Refine a specific step in an existing artifact.
+
+{history_prefix}Original Request: {step_refinement_user_message}
+
+Current Step to Refine:
+{json.dumps(step_to_refine, indent=2)}
+
+Refinement Instruction: {refinement.refinement_instruction}
+
+Relevant Content from Book:
+{context_text}
+
+{corrections_context}
+
+Refine ONLY the specified step based on the instruction. Keep all other steps unchanged.
+
+Return ONLY valid JSON with the refined step:
+{{
+  "id": "{refinement.step_id}",
+  "time": "...",
+  "action": "...",
+  "description": "...",
+  "checked": false
+}}"""
+                
+                # Refine step
+                response = client.chat.completions.create(
+                    model=settings.reasoning_model,
+                    messages=[
+                        {"role": "system", "content": "You are an Implementation Architect. Refine specific steps in artifacts based on user instructions."},
+                        {"role": "user", "content": artifact_prompt}
+                    ],
+                    temperature=0.3,
+                    response_format={"type": "json_object"}
+                )
+                
+                refined_step_json = response.choices[0].message.content
+                tokens_used = response.usage.total_tokens if response.usage else None
+                
+                try:
+                    refined_step = json.loads(refined_step_json)
+                except json.JSONDecodeError as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to parse refined step: {str(e)}")
+                
+                # Update step in artifact
+                updated_steps = steps.copy()
+                step_index = next((i for i, s in enumerate(updated_steps) if s.get("id") == refinement.step_id), None)
+                
+                if step_index is not None:
+                    updated_steps[step_index] = {**updated_steps[step_index], **refined_step}
+                
+                updated_artifact = original_artifact.copy()
+                updated_artifact["content"] = {"steps": updated_steps}
+                
+                # Update artifact in database
+                supabase.table("chat_messages").update({
+                    "artifact": updated_artifact
+                }).eq("id", refinement.message_id).execute()
+                
+                return {
+                    "message": "Step refined successfully",
+                    "artifact": updated_artifact,
+                    "refined_step_id": refinement.step_id,
+                    "tokens_used": tokens_used
+                }
+            else:
+                raise HTTPException(status_code=400, detail=f"Step refinement not supported for artifact type: {artifact_type}")
+        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid refinement request")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to refine artifact: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to refine artifact: {str(e)}")
+
 def stream_chat_response(
     chat_message: ChatMessage,
     current_user: dict,

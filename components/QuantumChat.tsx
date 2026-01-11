@@ -9,6 +9,7 @@ import CitationTooltip from './CitationTooltip'
 import ChunkViewerPanel from './ChunkViewerPanel'
 
 interface Message {
+  id?: string  // Message ID from database (for refinement)
   role: 'user' | 'assistant'
   content: string
   sources?: string[]
@@ -95,6 +96,7 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
         if (response.ok) {
           const data = await response.json()
           const formattedMessages = data.messages.map((msg: any) => ({
+            id: msg.id,  // Store message ID for refinement
             role: msg.role,
             content: msg.content,
             sources: msg.sources,
