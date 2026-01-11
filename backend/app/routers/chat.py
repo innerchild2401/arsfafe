@@ -129,6 +129,14 @@ class CorrectionRequest(BaseModel):
     book_id: Optional[str] = None
     chunk_id: Optional[str] = None
 
+class ArtifactRefinementRequest(BaseModel):
+    message_id: str  # ID of the message containing the artifact
+    refinement_type: str  # 'variable' or 'step'
+    variable_key: Optional[str] = None  # For variable refinement
+    variable_value: Optional[str] = None  # For variable refinement
+    step_id: Optional[str] = None  # For step refinement
+    refinement_instruction: Optional[str] = None  # For step refinement
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     chat_message: ChatMessage,
@@ -440,17 +448,17 @@ Present this in a clear, informative format."""
     if is_action_planner_query:
         print(f"🧠 PATH D (Action Planner): Generating structured artifact for implementation")
         
-        # Search for methodology/framework/script chunks
+        # Search for methodology/framework/script chunks (Phase 2: Use action metadata prioritization)
         query_embedding = generate_embedding(search_query)
         match_threshold = 0.6
         match_count = 10  # Get more chunks for methodology extraction
         
         chunks = []
         try:
-            # Try hybrid search first
+            # Try action metadata search first (prioritizes chunks with framework/script/derivation tags)
             try:
                 chunks_result = supabase.rpc(
-                    "match_child_chunks_hybrid",
+                    "match_child_chunks_with_action_metadata",
                     {
                         "query_embedding": query_embedding,
                         "query_text": search_query,
@@ -458,24 +466,43 @@ Present this in a clear, informative format."""
                         "match_count": match_count,
                         "book_ids": book_ids,
                         "keyword_weight": 0.5,
-                        "vector_weight": 0.5
+                        "vector_weight": 0.5,
+                        "action_metadata_tags": None  # NULL = prioritize any action_metadata, not just specific tags
                     }
                 ).execute()
                 chunks = chunks_result.data if chunks_result.data else []
-                print(f"🔍 Path D: Hybrid search found {len(chunks)} chunks")
-            except Exception as hybrid_error:
-                print(f"⚠️ Path D: Hybrid search not available, using vector search: {str(hybrid_error)}")
-                chunks_result = supabase.rpc(
-                    "match_child_chunks",
-                    {
-                        "query_embedding": query_embedding,
-                        "match_threshold": match_threshold,
-                        "match_count": match_count,
-                        "book_ids": book_ids
-                    }
-                ).execute()
-                chunks = chunks_result.data if chunks_result.data else []
-                print(f"🔍 Path D: Vector search found {len(chunks)} chunks")
+                print(f"🔍 Path D: Action metadata search found {len(chunks)} chunks (prioritized by methodology tags)")
+            except Exception as action_metadata_error:
+                print(f"⚠️ Path D: Action metadata search not available, falling back to hybrid search: {str(action_metadata_error)}")
+                # Fallback to hybrid search
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks_hybrid",
+                        {
+                            "query_embedding": query_embedding,
+                            "query_text": search_query,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids,
+                            "keyword_weight": 0.5,
+                            "vector_weight": 0.5
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                    print(f"🔍 Path D: Hybrid search found {len(chunks)} chunks")
+                except Exception as hybrid_error:
+                    print(f"⚠️ Path D: Hybrid search not available, using vector search: {str(hybrid_error)}")
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks",
+                        {
+                            "query_embedding": query_embedding,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                    print(f"🔍 Path D: Vector search found {len(chunks)} chunks")
         except Exception as e:
             print(f"❌ Path D: Search failed: {str(e)}")
             chunks = []
@@ -1459,17 +1486,17 @@ Instruction: Present this summary in a clear, structured format. If the user ask
     if is_action_planner_query:
         yield json.dumps({"type": "thinking", "step": "PATH D: Action Planner - Generating structured artifact..."}) + "\n"
         
-        # Search for methodology/framework chunks
+        # Search for methodology/framework chunks (Phase 2: Use action metadata prioritization)
         query_embedding = generate_embedding(search_query)
         match_threshold = 0.6
         match_count = 10
         
         chunks = []
         try:
-            yield json.dumps({"type": "thinking", "step": "Searching for methodologies and frameworks..."}) + "\n"
+            yield json.dumps({"type": "thinking", "step": "Searching for methodologies and frameworks (prioritizing tagged content)..."}) + "\n"
             try:
                 chunks_result = supabase.rpc(
-                    "match_child_chunks_hybrid",
+                    "match_child_chunks_with_action_metadata",
                     {
                         "query_embedding": query_embedding,
                         "query_text": search_query,
@@ -1477,23 +1504,42 @@ Instruction: Present this summary in a clear, structured format. If the user ask
                         "match_count": match_count,
                         "book_ids": book_ids,
                         "keyword_weight": 0.5,
-                        "vector_weight": 0.5
+                        "vector_weight": 0.5,
+                        "action_metadata_tags": None  # NULL = prioritize any action_metadata, not just specific tags
                     }
                 ).execute()
                 chunks = chunks_result.data if chunks_result.data else []
-                yield json.dumps({"type": "thinking", "step": f"Found {len(chunks)} relevant methodology chunks"}) + "\n"
-            except Exception as hybrid_error:
-                yield json.dumps({"type": "thinking", "step": "Using vector search..."}) + "\n"
-                chunks_result = supabase.rpc(
-                    "match_child_chunks",
-                    {
-                        "query_embedding": query_embedding,
-                        "match_threshold": match_threshold,
-                        "match_count": match_count,
-                        "book_ids": book_ids
-                    }
-                ).execute()
-                chunks = chunks_result.data if chunks_result.data else []
+                yield json.dumps({"type": "thinking", "step": f"Found {len(chunks)} relevant methodology chunks (prioritized by action metadata tags)"}) + "\n"
+            except Exception as action_metadata_error:
+                yield json.dumps({"type": "thinking", "step": "Action metadata search not available, using hybrid search..."}) + "\n"
+                # Fallback to hybrid search
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks_hybrid",
+                        {
+                            "query_embedding": query_embedding,
+                            "query_text": search_query,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids,
+                            "keyword_weight": 0.5,
+                            "vector_weight": 0.5
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                    yield json.dumps({"type": "thinking", "step": f"Found {len(chunks)} relevant methodology chunks"}) + "\n"
+                except Exception as hybrid_error:
+                    yield json.dumps({"type": "thinking", "step": "Using vector search..."}) + "\n"
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks",
+                        {
+                            "query_embedding": query_embedding,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
         except Exception as e:
             yield json.dumps({"type": "error", "message": f"Search failed: {str(e)}"}) + "\n"
             return

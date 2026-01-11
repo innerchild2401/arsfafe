@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Check, Clock, Sparkles, Code, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { InlineMath, BlockMath } from 'react-katex'
+import 'katex/dist/katex.min.css'
 
 interface ArtifactStep {
   id: string
@@ -42,10 +44,106 @@ interface ArtifactRendererProps {
   artifact: ArtifactData
   onStepToggle?: (stepId: string, checked: boolean) => void
   onStepRefine?: (stepId: string) => void
+  onVariableChange?: (variable: string, value: string) => void
 }
 
-export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine }: ArtifactRendererProps) {
+// Helper function to render markdown with LaTeX support
+function renderMarkdownWithLaTeX(content: string) {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+
+  // Match block math: $$...$$
+  const blockMathRegex = /\$\$([^$]+)\$\$/g
+  // Match inline math: $...$ (but not $$)
+  const inlineMathRegex = /(?<!\$)\$([^$\n]+?)\$(?!\$)/g
+
+  // Collect all matches
+  const matches: Array<{ type: 'block' | 'inline'; content: string; index: number; length: number }> = []
+  
+  let match: RegExpExecArray | null
+  blockMathRegex.lastIndex = 0
+  while ((match = blockMathRegex.exec(content)) !== null) {
+    matches.push({
+      type: 'block',
+      content: match[1],
+      index: match.index,
+      length: match[0].length
+    })
+  }
+
+  inlineMathRegex.lastIndex = 0
+  while ((match = inlineMathRegex.exec(content)) !== null) {
+    // Skip if it's part of a block math
+    const isInBlock = matches.some(m => 
+      m.type === 'block' && 
+      match!.index >= m.index && 
+      match!.index < m.index + m.length
+    )
+    if (!isInBlock) {
+      matches.push({
+        type: 'inline',
+        content: match[1],
+        index: match.index,
+        length: match[0].length
+      })
+    }
+  }
+
+  // Sort matches by index
+  matches.sort((a, b) => a.index - b.index)
+
+  // Build parts array
+  matches.forEach((mathMatch) => {
+    // Add text before math
+    if (mathMatch.index > lastIndex) {
+      parts.push(
+        <span key={`text-${lastIndex}`} className="text-zinc-300 whitespace-pre-wrap">
+          {content.slice(lastIndex, mathMatch.index)}
+        </span>
+      )
+    }
+
+    // Add math
+    try {
+      if (mathMatch.type === 'block') {
+        parts.push(
+          <div key={`math-block-${mathMatch.index}`} className="my-4">
+            <BlockMath math={mathMatch.content} />
+          </div>
+        )
+      } else {
+        parts.push(
+          <InlineMath key={`math-inline-${mathMatch.index}`} math={mathMatch.content} />
+        )
+      }
+    } catch (e) {
+      // If LaTeX parsing fails, render as plain text
+      parts.push(
+        <span key={`math-fallback-${mathMatch.index}`} className="text-zinc-400 font-mono">
+          ${mathMatch.content}$
+        </span>
+      )
+    }
+
+    lastIndex = mathMatch.index + mathMatch.length
+  })
+
+  // Add remaining text
+  if (lastIndex < content.length) {
+    parts.push(
+      <span key={`text-${lastIndex}`} className="text-zinc-300 whitespace-pre-wrap">
+        {content.slice(lastIndex)}
+      </span>
+    )
+  }
+
+  return parts.length > 0 ? parts : [<span key="text-fallback" className="text-zinc-300 whitespace-pre-wrap">{content}</span>]
+}
+
+export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine, onVariableChange }: ArtifactRendererProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
+  const [editingVariable, setEditingVariable] = useState<string | null>(null)
+  const [variableValues, setVariableValues] = useState<Record<string, string>>(artifact.variables || {})
 
   const handleStepClick = (stepId: string) => {
     setSelectedStepId(selectedStepId === stepId ? null : stepId)
@@ -54,6 +152,32 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
   const handleCheckboxChange = (stepId: string, checked: boolean) => {
     if (onStepToggle) {
       onStepToggle(stepId, checked)
+    }
+  }
+
+  const handleVariableEdit = (key: string) => {
+    setEditingVariable(key)
+  }
+
+  const handleVariableBlur = (key: string, value: string) => {
+    setEditingVariable(null)
+    const originalValue = artifact.variables?.[key] || ''
+    if (value !== originalValue && onVariableChange) {
+      setVariableValues(prev => ({ ...prev, [key]: value }))
+      onVariableChange(key, value)
+    } else if (value === originalValue) {
+      // Reset if unchanged
+      setVariableValues(prev => ({ ...prev, [key]: originalValue }))
+    }
+  }
+
+  const handleVariableKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, key: string) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur()
+    } else if (e.key === 'Escape') {
+      setEditingVariable(null)
+      // Reset to original value
+      setVariableValues(prev => ({ ...prev, [key]: artifact.variables?.[key] || '' }))
     }
   }
 
@@ -70,11 +194,29 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-zinc-50 font-mono">{artifact.title}</h2>
               {artifact.variables && Object.keys(artifact.variables).length > 0 && (
-                <div className="flex gap-2 mt-1">
-                  {Object.entries(artifact.variables).map(([key, value]) => (
-                    <span key={key} className="text-xs text-zinc-400 font-mono">
-                      {key}: {value}
-                    </span>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {Object.entries(variableValues).map(([key, value]) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="text-xs text-zinc-400 font-mono">{key}:</span>
+                      {editingVariable === key ? (
+                        <input
+                          type="text"
+                          value={value}
+                          onChange={(e) => setVariableValues(prev => ({ ...prev, [key]: e.target.value }))}
+                          onBlur={(e) => handleVariableBlur(key, e.target.value)}
+                          onKeyDown={(e) => handleVariableKeyDown(e, key)}
+                          className="text-xs text-zinc-200 font-mono bg-zinc-800 border border-violet-500/50 rounded px-1.5 py-0.5 focus:outline-none focus:border-violet-500 min-w-[80px]"
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          onClick={() => handleVariableEdit(key)}
+                          className="text-xs text-zinc-300 font-mono bg-zinc-800/50 border border-zinc-700 rounded px-1.5 py-0.5 hover:border-violet-500/50 hover:bg-zinc-800 cursor-pointer transition-colors"
+                        >
+                          {value}
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -187,6 +329,33 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
             </div>
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-zinc-50 font-mono">{artifact.title}</h2>
+              {artifact.variables && Object.keys(artifact.variables).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {Object.entries(variableValues).map(([key, value]) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="text-xs text-zinc-400 font-mono">{key}:</span>
+                      {editingVariable === key ? (
+                        <input
+                          type="text"
+                          value={value}
+                          onChange={(e) => setVariableValues(prev => ({ ...prev, [key]: e.target.value }))}
+                          onBlur={(e) => handleVariableBlur(key, e.target.value)}
+                          onKeyDown={(e) => handleVariableKeyDown(e, key)}
+                          className="text-xs text-zinc-200 font-mono bg-zinc-800 border border-violet-500/50 rounded px-1.5 py-0.5 focus:outline-none focus:border-violet-500 min-w-[80px]"
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          onClick={() => handleVariableEdit(key)}
+                          className="text-xs text-zinc-300 font-mono bg-zinc-800/50 border border-zinc-700 rounded px-1.5 py-0.5 hover:border-violet-500/50 hover:bg-zinc-800 cursor-pointer transition-colors"
+                        >
+                          {value}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -198,7 +367,9 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
               <div key={index} className="bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden">
                 {cell.type === 'markdown' && (
                   <div className="p-4 prose prose-invert prose-sm max-w-none">
-                    <div className="text-zinc-300 whitespace-pre-wrap">{cell.content}</div>
+                    <div className="text-zinc-300">
+                      {renderMarkdownWithLaTeX(cell.content)}
+                    </div>
                   </div>
                 )}
                 {cell.type === 'code' && (
@@ -254,6 +425,33 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
             </div>
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-zinc-50 font-mono">{artifact.title}</h2>
+              {artifact.variables && Object.keys(artifact.variables).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {Object.entries(variableValues).map(([key, value]) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="text-xs text-zinc-400 font-mono">{key}:</span>
+                      {editingVariable === key ? (
+                        <input
+                          type="text"
+                          value={value}
+                          onChange={(e) => setVariableValues(prev => ({ ...prev, [key]: e.target.value }))}
+                          onBlur={(e) => handleVariableBlur(key, e.target.value)}
+                          onKeyDown={(e) => handleVariableKeyDown(e, key)}
+                          className="text-xs text-zinc-200 font-mono bg-zinc-800 border border-violet-500/50 rounded px-1.5 py-0.5 focus:outline-none focus:border-violet-500 min-w-[80px]"
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          onClick={() => handleVariableEdit(key)}
+                          className="text-xs text-zinc-300 font-mono bg-zinc-800/50 border border-zinc-700 rounded px-1.5 py-0.5 hover:border-violet-500/50 hover:bg-zinc-800 cursor-pointer transition-colors"
+                        >
+                          {value}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -262,18 +460,36 @@ export default function ArtifactRenderer({ artifact, onStepToggle, onStepRefine 
         <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           <div className="space-y-4">
             {artifact.content.scenes.map((scene) => (
-              <div key={scene.id} className="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
-                <div className="text-xs text-zinc-400 mb-2 font-mono">{scene.context}</div>
-                <div className="space-y-2">
-                  <div className="flex items-start gap-3">
-                    <span className="text-sm font-semibold text-violet-400 font-mono flex-shrink-0 w-20">
-                      {scene.speaker}:
-                    </span>
-                    <p className="text-sm text-zinc-300 flex-1">{scene.text}</p>
+              <div key={scene.id} className="bg-zinc-950 border border-zinc-800 rounded-lg p-4 space-y-3">
+                {/* Context */}
+                <div className="text-xs text-zinc-400 font-mono">{scene.context}</div>
+                
+                {/* Script Cards: Distinct boxes for "What to Say" vs "What to Do" */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* "What to Say" Card */}
+                  <div className="bg-zinc-900 border border-violet-500/30 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="p-1 bg-violet-500/20 rounded">
+                        <FileText className="w-3.5 h-3.5 text-violet-400" />
+                      </div>
+                      <span className="text-xs font-semibold text-violet-400 font-mono">What to Say</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-xs text-zinc-400 font-mono">{scene.speaker}:</div>
+                      <p className="text-sm text-zinc-200 leading-relaxed">{scene.text}</p>
+                    </div>
                   </div>
+                  
+                  {/* "What to Do" Card */}
                   {scene.action && (
-                    <div className="ml-24 text-xs text-zinc-400 italic">
-                      [Action: {scene.action}]
+                    <div className="bg-zinc-900 border border-emerald-500/30 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="p-1 bg-emerald-500/20 rounded">
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                        </div>
+                        <span className="text-xs font-semibold text-emerald-400 font-mono">What to Do</span>
+                      </div>
+                      <p className="text-sm text-zinc-200 leading-relaxed">{scene.action}</p>
                     </div>
                   )}
                 </div>

@@ -23,6 +23,7 @@ from app.services.topic_labeler import generate_topic_labels
 from app.services.storage_service import upload_file_to_storage
 from app.services.log_service import log_info, log_success, log_error, log_warning
 from app.services.summary_service import generate_chapter_summary, generate_book_summary
+from app.services.action_metadata_service import extract_action_metadata
 
 router = APIRouter()
 
@@ -498,6 +499,22 @@ def process_book(
                 log_success(book_id, f"Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 print(f"✅ Generated {len(topic_labels) if topic_labels else 0} topic labels")
                 
+                # Extract action metadata (Phase 2: Ingestion Upgrade)
+                action_metadata = None
+                try:
+                    log_info(book_id, f"Extracting action metadata for section: {section_display}")
+                    print(f"⚡ Extracting action metadata for section: {section_display}...")
+                    action_metadata = extract_action_metadata(parent_text)
+                    if action_metadata and action_metadata.get("tags"):
+                        tags_str = ", ".join(action_metadata.get("tags", []))
+                        log_success(book_id, f"Found action metadata: {tags_str}")
+                        print(f"✅ Found action metadata: {tags_str}")
+                    else:
+                        print(f"   No action metadata found (descriptive content)")
+                except Exception as e:
+                    print(f"⚠️ Failed to extract action metadata: {str(e)}")
+                    # Continue without action metadata - not critical
+                
                 # Generate concise summary for this section (for parent_chunks.concise_summary)
                 section_summary = None
                 try:
@@ -508,14 +525,15 @@ def process_book(
                     print(f"⚠️ Failed to generate section summary: {str(e)}")
                     # Continue without summary - not critical
                 
-                # Insert parent chunk with summary
+                # Insert parent chunk with summary and action metadata
                 parent_data = {
                     "book_id": book_id,
                     "chapter_title": chapter_title,
                     "section_title": section_title,
                     "full_text": parent_text,
                     "topic_labels": topic_labels,
-                    "concise_summary": section_summary  # Store section summary
+                    "concise_summary": section_summary,  # Store section summary
+                    "action_metadata": action_metadata if action_metadata else None  # Store action metadata (Phase 2)
                 }
                 
                 parent_result = supabase.table("parent_chunks").insert(parent_data).execute()

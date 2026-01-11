@@ -47,7 +47,13 @@ export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading,
   if (artifact && !chunkId && !chunkData) {
     return (
       <div className="h-full w-full md:w-96 lg:w-[32rem] bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-2xl">
-        <ArtifactRenderer artifact={artifact} />
+        <ArtifactRenderer 
+          artifact={artifact}
+          onVariableChange={(variable, value) => {
+            // TODO: Implement artifact regeneration with new variables
+            console.log('Variable changed:', variable, '=', value)
+          }}
+        />
       </div>
     )
   }
@@ -78,7 +84,18 @@ export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading,
       {/* Content - Polymorphic Canvas */}
       <div className="flex-1 overflow-hidden">
         {view === 'composer' && artifact ? (
-          <ArtifactRenderer artifact={artifact} />
+          <ArtifactRenderer 
+            artifact={artifact}
+            onVariableChange={(variable, value) => {
+              // TODO: Implement artifact regeneration with new variables
+              // For now, just log the change
+              console.log('Variable changed:', variable, '=', value)
+              // This would trigger artifact regeneration:
+              // - Find the original message with this artifact
+              // - Regenerate artifact with new variables
+              // - Update the artifact in the message
+            }}
+          />
         ) : (
           <div className="flex-1 overflow-y-auto overscroll-contain p-4">
         {loading ? (
