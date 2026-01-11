@@ -619,8 +619,7 @@ IMPORTANT:
                     "chunk_map": chunk_map_reverse,
                     "tokens_used": tokens_used,
                     "model_used": "action_planner_path",
-                    # Store artifact in a JSONB column (we'll need to add this)
-                    # For now, we'll encode it in the response
+                    "artifact": artifact_data  # Store artifact JSONB
                 }).execute()
                 
                 # Return response with artifact
@@ -1605,7 +1604,8 @@ Return ONLY valid JSON, no markdown."""
                     "sources": sources_list,
                     "chunk_map": chunk_map_reverse,
                     "tokens_used": tokens_used,
-                    "model_used": "action_planner_path_streaming"
+                    "model_used": "action_planner_path_streaming",
+                    "artifact": artifact_data  # Store artifact JSONB
                 }).execute()
                 
                 # Stream the message and artifact

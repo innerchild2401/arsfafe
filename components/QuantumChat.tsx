@@ -99,6 +99,7 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
             sources: msg.sources,
             retrieved_chunks: msg.retrieved_chunks || [],
             chunk_map: msg.chunk_map || {},  // Load chunk_map from stored messages if available
+            artifact: msg.artifact || null,  // Load artifact from stored messages if available
             timestamp: new Date(msg.created_at)
           }))
           setMessages(formattedMessages.reverse())
