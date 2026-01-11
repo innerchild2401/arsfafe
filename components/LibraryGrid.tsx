@@ -71,110 +71,148 @@ export default function LibraryGrid({ books }: LibraryGridProps) {
   }
 
   return (
-    <div className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/30">
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-zinc-900/50 border-b border-zinc-800">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Title
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Author
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Chunks
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Last Chat
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-800">
-            {books.map((access) => {
-              const book = access.books
-              const isHovered = hoveredRow === book.id
-              
-              return (
-                <tr
-                  key={book.id}
-                  className="hover:bg-zinc-900/50 transition-colors"
-                  onMouseEnter={() => setHoveredRow(book.id)}
-                  onMouseLeave={() => setHoveredRow(null)}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(book.status)}
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(book.status)}`}>
-                        {book.status}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-medium text-zinc-50">
-                      {book.title || book.original_filename}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm text-zinc-400">
-                      {book.author || '—'}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-mono text-zinc-400">
-                      {/* TODO: Fetch actual chunk count */}
-                      —
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-mono text-zinc-500">
-                      {/* TODO: Fetch last chat time */}
-                      —
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className={`flex items-center justify-end gap-2 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
-                      {book.status === 'ready' && (
-                        <>
-                          <Link
-                            href={`/dashboard/knowledge-center?book=${book.id}`}
-                            className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-emerald-500/20 border border-emerald-500/30 rounded hover:bg-emerald-500/30 transition-colors"
-                          >
-                            Chat
-                          </Link>
-                          <Link
-                            href={`/dashboard/books/${book.id}/chunks`}
-                            className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-violet-500/20 border border-violet-500/30 rounded hover:bg-violet-500/30 transition-colors"
-                          >
-                            Inspect
-                          </Link>
-                        </>
-                      )}
-                      <button
-                        className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-rose-500/20 border border-rose-500/30 rounded hover:bg-rose-500/30 transition-colors"
-                        onClick={() => {
-                          // TODO: Implement delete
-                          if (confirm('Delete this book?')) {
-                            // Delete logic
-                          }
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+    <>
+      {/* Desktop: Table Grid - Hidden on Mobile */}
+      <div className="hidden md:block border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/30">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-zinc-900/50 border-b border-zinc-800">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Title
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Author
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Chunks
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Last Chat
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800">
+              {books.map((access) => {
+                const book = access.books
+                const isHovered = hoveredRow === book.id
+                
+                return (
+                  <tr
+                    key={book.id}
+                    className="hover:bg-zinc-900/50 transition-colors"
+                    onMouseEnter={() => setHoveredRow(book.id)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {getStatusIcon(book.status)}
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(book.status)}`}>
+                          {book.status}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-zinc-50">
+                        {book.title || book.original_filename}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-zinc-400">
+                        {book.author || '—'}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-mono text-zinc-400">
+                        {/* TODO: Fetch actual chunk count */}
+                        —
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-mono text-zinc-500">
+                        {/* TODO: Fetch last chat time */}
+                        —
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className={`flex items-center justify-end gap-2 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+                        {book.status === 'ready' && (
+                          <>
+                            <Link
+                              href={`/dashboard/knowledge-center?book=${book.id}`}
+                              className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-emerald-500/20 border border-emerald-500/30 rounded hover:bg-emerald-500/30 transition-colors"
+                            >
+                              Chat
+                            </Link>
+                            <Link
+                              href={`/dashboard/books/${book.id}/chunks`}
+                              className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-violet-500/20 border border-violet-500/30 rounded hover:bg-violet-500/30 transition-colors"
+                            >
+                              Inspect
+                            </Link>
+                          </>
+                        )}
+                        <button
+                          className="px-3 py-1.5 text-xs font-medium text-zinc-50 bg-rose-500/20 border border-rose-500/30 rounded hover:bg-rose-500/30 transition-colors"
+                          onClick={() => {
+                            // TODO: Implement delete
+                            if (confirm('Delete this book?')) {
+                              // Delete logic
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+
+      {/* Mobile: Feed List - Hidden on Desktop */}
+      <div className="md:hidden bg-zinc-950">
+        <div className="divide-y divide-zinc-900">
+          {books.map((access) => {
+            const book = access.books
+            return (
+              <Link
+                key={book.id}
+                href={`/dashboard/knowledge-center?book=${book.id}`}
+                className="flex items-center h-16 px-4 border-b border-zinc-900 hover:bg-zinc-900/50 transition-colors"
+              >
+                {/* Status Dot */}
+                <div className="flex-shrink-0 mr-3">
+                  {getStatusIcon(book.status)}
+                </div>
+                
+                {/* Title */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-zinc-50 truncate">
+                    {book.title || book.original_filename}
+                  </div>
+                </div>
+                
+                {/* Chevron */}
+                <div className="flex-shrink-0 ml-3">
+                  <svg className="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      </div>
+    </>
   )
 }

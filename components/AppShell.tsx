@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import BottomNav from '@/components/BottomNav'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -66,10 +67,10 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Rail Navigation */}
+      {/* Desktop Rail Navigation - Hidden on Mobile */}
       <aside
         className={cn(
-          "fixed md:relative h-full z-50 bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col",
+          "hidden md:flex h-full z-50 bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col",
           sidebarExpanded ? 'w-64' : 'w-16'
         )}
         onMouseEnter={() => setSidebarExpanded(true)}
@@ -126,9 +127,12 @@ export default function AppShell({ children }: AppShellProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden pb-16 md:pb-0">
         {children}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <BottomNav />
     </div>
   )
 }
