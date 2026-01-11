@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import QuantumChat from '@/components/QuantumChat'
 import ContextSidebar from '@/components/ContextSidebar'
-import ChatFAB from '@/components/ChatFAB'
 import { Sparkles } from 'lucide-react'
 
 export default function KnowledgeCenterPage() {
@@ -92,9 +91,6 @@ export default function KnowledgeCenterPage() {
           </div>
         </div>
       </main>
-
-      {/* Mobile FAB and Drawer */}
-      <ChatFAB selectedBookId={selectedBookId} books={books} />
     </div>
   )
 }

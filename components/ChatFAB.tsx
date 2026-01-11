@@ -1,6 +1,8 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { Sparkles, X } from 'lucide-react'
 import {
   Drawer,
@@ -11,13 +13,53 @@ import {
 } from '@/components/ui/drawer'
 import QuantumChat from './QuantumChat'
 
-interface ChatFABProps {
-  selectedBookId: string | null
-  books: any[]
-}
-
-export default function ChatFAB({ selectedBookId, books }: ChatFABProps) {
+export default function ChatFAB() {
   const [isOpen, setIsOpen] = useState(false)
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
+  const [books, setBooks] = useState<any[]>([])
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const supabase = createClient()
+
+  useEffect(() => {
+    const loadBooksData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { data: booksData } = await supabase
+          .from('user_book_access')
+          .select('book_id, books(*)')
+          .eq('user_id', user.id)
+          .eq('is_visible', true)
+
+        if (booksData) {
+          const readyBooks = booksData
+            .map((access: any) => access.books)
+            .filter((book: any) => book && book.status === 'ready')
+          
+          setBooks(readyBooks)
+        }
+      } catch (error) {
+        console.error('Error loading books:', error)
+      }
+    }
+    
+    loadBooksData()
+  }, [supabase])
+
+  // Update selectedBookId from URL params
+  useEffect(() => {
+    const bookId = searchParams.get('book')
+    if (bookId && books.find((b: any) => b.id === bookId)) {
+      setSelectedBookId(bookId)
+    } else if (books.length === 1) {
+      // Auto-select if only one book available
+      setSelectedBookId(books[0].id)
+    } else {
+      setSelectedBookId(null)
+    }
+  }, [searchParams, books])
 
   return (
     <>

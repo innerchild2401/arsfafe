@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from 'react'
 import Link from 'next/link'
 
 interface Book {
@@ -17,8 +16,6 @@ interface ContextSidebarProps {
 }
 
 export default function ContextSidebar({ books, selectedBookId, onSelectBook }: ContextSidebarProps) {
-  const [isOpen, setIsOpen] = useState(true)
-
   const getHealthDot = (status: string) => {
     switch (status) {
       case 'ready':
@@ -33,21 +30,9 @@ export default function ContextSidebar({ books, selectedBookId, onSelectBook }: 
   }
 
   return (
-    <aside className={`
-      w-80 border-r border-zinc-800 bg-zinc-900/50
-      flex flex-col
-      ${isOpen ? 'block' : 'hidden'}
-    `}>
-      <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+    <aside className="hidden md:block w-80 border-r border-zinc-800 bg-zinc-900/50 flex flex-col">
+      <div className="p-4 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Context</h2>
-        <button
-          onClick={() => setIsOpen(false)}
-          className="md:hidden p-1 text-zinc-500 hover:text-zinc-300"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-2">

@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import BottomNav from '@/components/BottomNav'
+import ChatFAB from '@/components/ChatFAB'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -133,6 +134,9 @@ export default function AppShell({ children }: AppShellProps) {
 
       {/* Mobile Bottom Navigation */}
       <BottomNav />
+
+      {/* Global Mobile Chat FAB */}
+      <ChatFAB />
     </div>
   )
 }

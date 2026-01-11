@@ -108,8 +108,8 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
-      {/* Left Panel - Library List */}
-      <div className="w-80 border-r border-border bg-card flex flex-col flex-shrink-0">
+      {/* Left Panel - Library List - Hidden on Mobile */}
+      <div className="hidden md:flex w-80 border-r border-border bg-card flex-col flex-shrink-0">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Library</h2>
@@ -206,8 +206,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Right Panel - Book Details */}
-      <div className="w-96 border-l border-border bg-card flex flex-col flex-shrink-0">
+      {/* Right Panel - Book Details - Hidden on Mobile */}
+      <div className="hidden md:flex w-96 border-l border-border bg-card flex-col flex-shrink-0">
         <div className="p-4 border-b border-border">
           <h2 className="text-sm font-semibold text-foreground">Details</h2>
         </div>
