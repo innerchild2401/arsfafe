@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import QuantumChat from '@/components/QuantumChat'
 import ContextSidebar from '@/components/ContextSidebar'
+import ChatFAB from '@/components/ChatFAB'
 
 export default function KnowledgeCenterPage() {
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
@@ -98,9 +99,14 @@ export default function KnowledgeCenterPage() {
           </div>
         </header>
 
-        {/* Chat Component */}
-        <QuantumChat selectedBookId={selectedBookId} books={books} />
+        {/* Chat Component - Desktop Only */}
+        <div className="hidden md:block flex-1">
+          <QuantumChat selectedBookId={selectedBookId} books={books} />
+        </div>
       </main>
+
+      {/* Mobile FAB and Drawer */}
+      <ChatFAB selectedBookId={selectedBookId} books={books} />
     </div>
   )
 }
