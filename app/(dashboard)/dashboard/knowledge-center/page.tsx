@@ -6,11 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import QuantumChat from '@/components/QuantumChat'
 import ContextSidebar from '@/components/ContextSidebar'
 import ChatFAB from '@/components/ChatFAB'
+import { Sparkles } from 'lucide-react'
 
 export default function KnowledgeCenterPage() {
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
   const [books, setBooks] = useState<any[]>([])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
@@ -56,20 +56,8 @@ export default function KnowledgeCenterPage() {
 
   return (
     <div className="flex h-full bg-zinc-950">
-      {/* Sidebar Overlay for Mobile */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Context Sidebar */}
-      <div className={`
-        fixed md:relative inset-y-0 left-0 z-50 md:z-auto
-        transform transition-transform duration-300 ease-in-out
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
+      {/* Context Sidebar - Desktop Only (Hidden on Mobile) */}
+      <div className="hidden md:block md:relative flex-shrink-0">
         <ContextSidebar
           books={books}
           selectedBookId={selectedBookId}
@@ -79,29 +67,29 @@ export default function KnowledgeCenterPage() {
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
-              aria-label="Open sidebar"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <h1 className="text-base font-semibold text-zinc-50 truncate">
-              {selectedBookId 
-                ? books.find(b => b.id === selectedBookId)?.title || 'Quantum Chat'
-                : 'All Knowledge Base'}
-            </h1>
-          </div>
+        {/* Header - Desktop Only */}
+        <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
+          <h1 className="text-base font-semibold text-zinc-50 truncate">
+            {selectedBookId 
+              ? books.find(b => b.id === selectedBookId)?.title || 'Quantum Chat'
+              : 'All Knowledge Base'}
+          </h1>
         </header>
 
         {/* Chat Component - Desktop Only */}
         <div className="hidden md:block flex-1">
           <QuantumChat selectedBookId={selectedBookId} books={books} />
+        </div>
+
+        {/* Mobile: Empty state with FAB visible */}
+        <div className="md:hidden flex-1 flex items-center justify-center">
+          <div className="text-center px-6">
+            <div className="mb-4">
+              <Sparkles className="w-12 h-12 text-emerald-500 mx-auto" />
+            </div>
+            <h2 className="text-lg font-semibold text-zinc-50 mb-2">Ready to chat?</h2>
+            <p className="text-sm text-zinc-400 mb-6">Tap the button below to start a conversation</p>
+          </div>
         </div>
       </main>
 

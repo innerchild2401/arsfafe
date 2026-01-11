@@ -32,8 +32,8 @@ export default function ChatFAB({ selectedBookId, books }: ChatFABProps) {
 
       {/* Chat Drawer - Mobile Only */}
       <Drawer open={isOpen} onOpenChange={setIsOpen}>
-        <DrawerContent className="max-h-[85vh] bg-zinc-950 border-t border-zinc-800">
-          <DrawerHeader className="border-b border-zinc-800 bg-zinc-900/50 pb-3">
+        <DrawerContent className="h-[85vh] bg-zinc-950 border-t border-zinc-800 flex flex-col">
+          <DrawerHeader className="border-b border-zinc-800 bg-zinc-900/50 pb-3 flex-shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <DrawerTitle className="text-zinc-50 font-mono text-sm">Quantum Chat</DrawerTitle>
@@ -53,8 +53,8 @@ export default function ChatFAB({ selectedBookId, books }: ChatFABProps) {
             </div>
           </DrawerHeader>
           
-          {/* Chat Content */}
-          <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 100px)' }}>
+          {/* Chat Content - flex-1 min-h-0 allows scrolling to work */}
+          <div className="flex-1 min-h-0 flex flex-col">
             <QuantumChat selectedBookId={selectedBookId} books={books} />
           </div>
         </DrawerContent>
