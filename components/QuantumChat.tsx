@@ -15,6 +15,13 @@ interface Message {
   retrieved_chunks?: string[]  // Chunk UUIDs
   chunk_map?: Record<string, string>  // persistent_id -> chunk_uuid mapping
   timestamp?: Date
+  artifact?: {
+    artifact_type: 'checklist' | 'notebook' | 'script'
+    title: string
+    content: any
+    citations?: string[]
+    variables?: Record<string, string>
+  } | null
 }
 
 interface QuantumChatProps {
@@ -169,6 +176,7 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
       let fullContent = ''
       let finalSources: string[] = []
       let finalChunkMap: Record<string, string> = {}
+      let finalArtifact: Message['artifact'] = null
 
       if (!reader) {
         throw new Error('No response body')
@@ -209,10 +217,21 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
                 // The citation parsing happens in parseCitations function
                 break
 
+              case 'artifact':
+                // Path D: Structured artifact received
+                finalArtifact = event.artifact
+                // Update message with artifact
+                setMessages(prev => prev.map((msg, idx) => 
+                  idx === prev.length - 1 && msg.role === 'assistant'
+                    ? { ...msg, artifact: finalArtifact }
+                    : msg
+                ))
+                break
+
               case 'done':
                 finalSources = event.sources || []
                 finalChunkMap = event.chunk_map || {}
-                // Update message with final metadata
+                // Update message with final metadata (preserve artifact if already set)
                 setMessages(prev => prev.map((msg, idx) => 
                   idx === prev.length - 1 && msg.role === 'assistant'
                     ? { 
@@ -220,7 +239,8 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
                         content: fullContent,
                         sources: finalSources,
                         chunk_map: finalChunkMap,
-                        retrieved_chunks: event.retrieved_chunks || []
+                        retrieved_chunks: event.retrieved_chunks || [],
+                        artifact: msg.artifact || finalArtifact  // Preserve artifact if already set
                       }
                     : msg
                 ))
@@ -411,10 +431,42 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
                         <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-500/50" />
                         
                         {/* Content */}
-                        <div className="ml-4 pl-4 bg-zinc-900/50 rounded-lg p-4 border-l-2 border-emerald-500/30">
+                        <div className="ml-4 pl-4 bg-zinc-900/50 rounded-lg p-4 border-l-2 border-emerald-500/30 space-y-3">
                           <div className="font-serif text-zinc-100 text-sm leading-relaxed whitespace-pre-wrap">
                             {parseCitations(message.content, message, message.sources)}
                           </div>
+                          
+                          {/* View Artifact Card (Path D) */}
+                          {message.artifact && (
+                            <div 
+                              className="mt-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg cursor-pointer hover:bg-violet-500/20 transition-colors"
+                              onClick={() => {
+                                setPanelOpen(true)
+                                setSelectedChunkId(null)  // Clear chunk selection to show artifact
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 bg-violet-500/20 rounded">
+                                  <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div className="flex-1">
+                                  <div className="text-sm font-semibold text-violet-400 font-mono">
+                                    {message.artifact.title}
+                                  </div>
+                                  <div className="text-xs text-zinc-400 mt-0.5">
+                                    {message.artifact.artifact_type === 'checklist' && 'Checklist'}
+                                    {message.artifact.artifact_type === 'notebook' && 'Notebook'}
+                                    {message.artifact.artifact_type === 'script' && 'Script'}
+                                  </div>
+                                </div>
+                                <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -529,6 +581,7 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
               onClose={handleClosePanel}
               chunkData={chunkData}
               loading={chunkLoading}
+              artifact={messages.find(m => m.artifact)?.artifact || null}
             />
           </div>
         </>

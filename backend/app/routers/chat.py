@@ -117,6 +117,7 @@ class ChatResponse(BaseModel):
     retrieved_chunks: Optional[List[str]] = None  # List of chunk UUIDs for citation mapping
     chunk_map: Optional[dict] = None  # Map of persistent IDs (#chk_xxx) to chunk UUIDs
     tokens_used: Optional[int] = None
+    artifact: Optional[dict] = None  # Structured artifact for Path D (checklist/notebook/script)
 
 class CorrectionRequest(BaseModel):
     original_message: str
@@ -202,10 +203,11 @@ async def chat(
             tokens_used=None
         )
     
-    # THREE-PATH BRAIN STRATEGY
+    # FOUR-PATH BRAIN STRATEGY
     # Path A (Specific Query): Hybrid Search (Vector + Keyword) for detailed questions
     # Path B (Global Query): Pre-computed summaries for general questions
     # Path C (Deep Reasoner): Reasoning model for complex analysis
+    # Path D (Action Planner): Structured artifacts (schedules, scripts, notebooks) for implementation
     
     # CONVERSATION MEMORY: Fetch last 3 turn pairs (6 messages) for context
     conversation_history = get_conversation_history(supabase, user_id, chat_message.book_id, limit=6)
@@ -228,6 +230,15 @@ async def chat(
     
     is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
     
+    # Detect action planner intent (Path D: Plan, Schedule, How to, Solve, Simulate, Script)
+    action_planner_keywords = [
+        "plan", "schedule", "how to", "how do", "solve", "simulate", "simulation",
+        "script", "routine", "checklist", "steps", "step-by-step", "guide me",
+        "create a", "make a", "build a", "design a", "implement", "methodology",
+        "framework", "process", "procedure", "workflow"
+    ]
+    is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
+    
     # Detect global intent (summarize, overview, "what is this book about")
     global_intent_keywords = [
         "summarize", "summarise", "summary", "overview", "what is this book about",
@@ -235,7 +246,7 @@ async def chat(
         "what does this book cover", "what is the book about", "book summary"
     ]
     
-    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query
+    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
     
     # PATH B: Global Query - Use pre-computed summaries
     if is_global_query and chat_message.book_id and len(book_ids) == 1:
@@ -424,6 +435,205 @@ Present this in a clear, informative format."""
                 # No chunks at all - fall through to specific query path
                 print(f"⚠️ No chunks found for ToC hack, falling back to specific query path...")
                 is_global_query = False  # Fall back to Path A or Path C
+    
+    # PATH D: Action Planner - Generate Structured Artifacts (Schedules, Scripts, Notebooks)
+    if is_action_planner_query:
+        print(f"🧠 PATH D (Action Planner): Generating structured artifact for implementation")
+        
+        # Search for methodology/framework/script chunks
+        query_embedding = generate_embedding(search_query)
+        match_threshold = 0.6
+        match_count = 10  # Get more chunks for methodology extraction
+        
+        chunks = []
+        try:
+            # Try hybrid search first
+            try:
+                chunks_result = supabase.rpc(
+                    "match_child_chunks_hybrid",
+                    {
+                        "query_embedding": query_embedding,
+                        "query_text": search_query,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids,
+                        "keyword_weight": 0.5,
+                        "vector_weight": 0.5
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                print(f"🔍 Path D: Hybrid search found {len(chunks)} chunks")
+            except Exception as hybrid_error:
+                print(f"⚠️ Path D: Hybrid search not available, using vector search: {str(hybrid_error)}")
+                chunks_result = supabase.rpc(
+                    "match_child_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                print(f"🔍 Path D: Vector search found {len(chunks)} chunks")
+        except Exception as e:
+            print(f"❌ Path D: Search failed: {str(e)}")
+            chunks = []
+        
+        if chunks:
+            # Enhance chunks with parent context
+            chunks = get_parent_context_for_chunks(supabase, chunks)
+            
+            # Build context with citations
+            context_parts = []
+            chunk_map_reverse = {}
+            retrieved_chunk_ids = []
+            
+            for i, chunk in enumerate(chunks[:10]):  # Limit to top 10
+                chunk_id = chunk.get("id")
+                chunk_text = chunk.get("text", "")
+                persistent_id = generate_chunk_id(chunk_id)
+                chunk_map_reverse[persistent_id] = chunk_id
+                retrieved_chunk_ids.append(chunk_id)
+                
+                parent = chunk.get("parent_context")
+                if parent:
+                    chapter_title = parent.get("chapter_title") or "Unknown Chapter"
+                    section_title = parent.get("section_title") or ""
+                    context_parts.append(f"[{persistent_id}] {chapter_title}" + (f" / {section_title}" if section_title else ""))
+                    context_parts.append(chunk_text)
+                else:
+                    context_parts.append(f"[{persistent_id}] {chunk_text}")
+            
+            context_text = "\n\n".join(context_parts)
+            
+            # Get relevant corrections
+            corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
+            corrections_context = build_corrections_context(corrections) if corrections else ""
+            
+            # Build artifact generation prompt
+            client = OpenAI(api_key=settings.openai_api_key)
+            
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
+            artifact_prompt = f"""You are an Implementation Architect. Your job is to extract methodologies, frameworks, scripts, or step-by-step procedures from the provided book content and generate a structured, actionable artifact.
+
+{history_prefix}User Request: {chat_message.message}
+
+Relevant Content from Book:
+{context_text}
+
+{corrections_context}
+
+Your task:
+1. Identify the methodology, framework, script, or procedure described in the content
+2. Extract the step-by-step instructions, schedules, or computational steps
+3. Determine the artifact type:
+   - "checklist": For routines, schedules, step-by-step guides (e.g., sleep training, workout routines)
+   - "notebook": For mathematical derivations, simulations, computational problems (e.g., physics problems, engineering calculations)
+   - "script": For conversational scripts, dialogue templates, or interaction patterns
+
+4. Generate a JSON artifact with this exact structure:
+{{
+  "artifact_type": "checklist" | "notebook" | "script",
+  "title": "Short descriptive title",
+  "content": {{
+    // For checklist:
+    "steps": [
+      {{"id": "step_1", "time": "7:00 PM", "action": "Bedtime routine", "description": "Detailed instruction", "checked": false}},
+      ...
+    ],
+    // OR for notebook:
+    "cells": [
+      {{"type": "markdown", "content": "Theory explanation"}},
+      {{"type": "code", "language": "python", "content": "code here"}},
+      {{"type": "output", "content": "result"}},
+      ...
+    ],
+    // OR for script:
+    "scenes": [
+      {{"id": "scene_1", "context": "Setting", "speaker": "Parent", "text": "What to say", "action": "What to do"}},
+      ...
+    ]
+  }},
+  "citations": ["#chk_xxxx", "#chk_yyyy"],
+  "variables": {{"age": "2 years", "duration": "5 minutes"}}  // Extract any variables mentioned
+}}
+
+IMPORTANT:
+- Return ONLY valid JSON, no markdown, no explanations
+- Use the persistent chunk IDs (#chk_xxxx) from the content for citations
+- Make the artifact actionable and specific to the user's request
+- For checklists: Include times, durations, or sequences
+- For notebooks: Include mathematical notation, code, or computational steps
+- For scripts: Include dialogue and actions"""
+
+            # Use reasoning model (GPT-4o) for artifact generation
+            response = client.chat.completions.create(
+                model=settings.reasoning_model,  # Use GPT-4o for structured generation
+                messages=[
+                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content."},
+                    {"role": "user", "content": artifact_prompt}
+                ],
+                temperature=0.3,  # Lower temperature for more structured output
+                response_format={"type": "json_object"}  # Force JSON output
+            )
+            
+            artifact_json_str = response.choices[0].message.content
+            tokens_used = response.usage.total_tokens if response.usage else None
+            
+            # Parse and validate JSON
+            try:
+                artifact_data = json.loads(artifact_json_str)
+            except json.JSONDecodeError as e:
+                print(f"⚠️ Path D: Failed to parse JSON artifact: {str(e)}")
+                # Fall back to Path A
+                is_action_planner_query = False
+            else:
+                # Build sources list
+                sources_list = list(set([f"#{chunk_id}" for chunk_id in chunk_map_reverse.keys()]))
+                
+                # Save messages with artifact
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "user",
+                    "content": chat_message.message,
+                    "tokens_used": None,
+                    "model_used": None
+                }).execute()
+                
+                # Store artifact in message metadata (we'll add an artifact column or use JSONB)
+                assistant_message = f"I've created a {artifact_data.get('artifact_type', 'plan')} for you. View it in the Composer pane."
+                
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "assistant",
+                    "content": assistant_message,
+                    "retrieved_chunks": retrieved_chunk_ids,
+                    "sources": sources_list,
+                    "chunk_map": chunk_map_reverse,
+                    "tokens_used": tokens_used,
+                    "model_used": "action_planner_path",
+                    # Store artifact in a JSONB column (we'll need to add this)
+                    # For now, we'll encode it in the response
+                }).execute()
+                
+                # Return response with artifact
+                return ChatResponse(
+                    response=assistant_message,
+                    sources=sources_list,
+                    retrieved_chunks=retrieved_chunk_ids,
+                    tokens_used=tokens_used,
+                    artifact=artifact_data  # Add artifact to response
+                )
+        else:
+            print(f"⚠️ Path D: No chunks found, falling back to Path A...")
+            is_action_planner_query = False
     
     # PATH C: Deep Reasoner - Use Reasoning Model for Complex Analysis
     # (Triggers before Path A for Analyze/Compare/Why/Connect queries)
@@ -1123,6 +1333,7 @@ def stream_chat_response(
     user_message_lower: str,
     is_reasoning_query: bool,
     is_global_query: bool,
+    is_action_planner_query: bool,
     is_name_question: bool
 ):
     """
@@ -1244,6 +1455,168 @@ Instruction: Present this summary in a clear, structured format. If the user ask
             
             yield json.dumps({"type": "done", "sources": [f"{book.get('title', 'Unknown')} (Executive Summary)"], "retrieved_chunks": [], "chunk_map": {}, "tokens_used": tokens_used}) + "\n"
             return
+    
+    # Path D: Action Planner (Streaming version)
+    if is_action_planner_query:
+        yield json.dumps({"type": "thinking", "step": "PATH D: Action Planner - Generating structured artifact..."}) + "\n"
+        
+        # Search for methodology/framework chunks
+        query_embedding = generate_embedding(search_query)
+        match_threshold = 0.6
+        match_count = 10
+        
+        chunks = []
+        try:
+            yield json.dumps({"type": "thinking", "step": "Searching for methodologies and frameworks..."}) + "\n"
+            try:
+                chunks_result = supabase.rpc(
+                    "match_child_chunks_hybrid",
+                    {
+                        "query_embedding": query_embedding,
+                        "query_text": search_query,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids,
+                        "keyword_weight": 0.5,
+                        "vector_weight": 0.5
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                yield json.dumps({"type": "thinking", "step": f"Found {len(chunks)} relevant methodology chunks"}) + "\n"
+            except Exception as hybrid_error:
+                yield json.dumps({"type": "thinking", "step": "Using vector search..."}) + "\n"
+                chunks_result = supabase.rpc(
+                    "match_child_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+        except Exception as e:
+            yield json.dumps({"type": "error", "message": f"Search failed: {str(e)}"}) + "\n"
+            return
+        
+        if chunks:
+            yield json.dumps({"type": "thinking", "step": "Extracting methodology and building artifact..."}) + "\n"
+            
+            # Enhance chunks with parent context
+            chunks = get_parent_context_for_chunks(chunks, supabase)
+            
+            # Build context
+            context_parts = []
+            chunk_map_reverse = {}
+            retrieved_chunk_ids = []
+            
+            for i, chunk in enumerate(chunks[:10]):
+                chunk_id = chunk.get("id")
+                chunk_text = chunk.get("context_text") or chunk.get("text", "")
+                persistent_id = generate_chunk_id(chunk_id) if chunk_id else f"#chk_unknown_{len(chunk_map_reverse)}"
+                chunk_map_reverse[persistent_id] = chunk_id
+                retrieved_chunk_ids.append(chunk_id)
+                
+                chapter_title = chunk.get("chapter_title") or "Unknown Chapter"
+                section_title = chunk.get("section_title") or ""
+                context_parts.append(f"[{persistent_id}] {chapter_title}" + (f" / {section_title}" if section_title else ""))
+                context_parts.append(chunk_text)
+            
+            context_text = "\n\n".join(context_parts)
+            
+            # Get corrections
+            corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
+            corrections_context = build_corrections_context(corrections) if corrections else ""
+            
+            # Build artifact prompt
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
+            artifact_prompt = f"""You are an Implementation Architect. Extract methodologies, frameworks, scripts, or step-by-step procedures from the provided book content and generate a structured, actionable artifact.
+
+{history_prefix}User Request: {chat_message.message}
+
+Relevant Content from Book:
+{context_text}
+
+{corrections_context}
+
+Generate a JSON artifact with this structure:
+{{
+  "artifact_type": "checklist" | "notebook" | "script",
+  "title": "Short descriptive title",
+  "content": {{
+    // For checklist: {{"steps": [{{"id": "step_1", "time": "7:00 PM", "action": "...", "description": "...", "checked": false}}]}}
+    // For notebook: {{"cells": [{{"type": "markdown|code|output", "content": "..."}}]}}
+    // For script: {{"scenes": [{{"id": "scene_1", "context": "...", "speaker": "...", "text": "...", "action": "..."}}]}}
+  }},
+  "citations": ["#chk_xxxx"],
+  "variables": {{}}
+}}
+
+Return ONLY valid JSON, no markdown."""
+            
+            yield json.dumps({"type": "thinking", "step": "Generating structured artifact with GPT-4o..."}) + "\n"
+            
+            # Use reasoning model for artifact generation
+            response = client.chat.completions.create(
+                model=settings.reasoning_model,
+                messages=[
+                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content."},
+                    {"role": "user", "content": artifact_prompt}
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            
+            artifact_json_str = response.choices[0].message.content
+            tokens_used = response.usage.total_tokens if response.usage else None
+            
+            try:
+                artifact_data = json.loads(artifact_json_str)
+            except json.JSONDecodeError as e:
+                yield json.dumps({"type": "error", "message": f"Failed to parse artifact JSON: {str(e)}"}) + "\n"
+                # Fall back to Path A
+                is_action_planner_query = False
+            else:
+                # Build sources
+                sources_list = list(set([f"#{chunk_id}" for chunk_id in chunk_map_reverse.keys()]))
+                
+                # Save messages
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "user",
+                    "content": chat_message.message,
+                    "tokens_used": None,
+                    "model_used": None
+                }).execute()
+                
+                assistant_message = f"I've created a {artifact_data.get('artifact_type', 'plan')} for you. View it in the Composer pane."
+                
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "assistant",
+                    "content": assistant_message,
+                    "retrieved_chunks": retrieved_chunk_ids,
+                    "sources": sources_list,
+                    "chunk_map": chunk_map_reverse,
+                    "tokens_used": tokens_used,
+                    "model_used": "action_planner_path_streaming"
+                }).execute()
+                
+                # Stream the message and artifact
+                yield json.dumps({"type": "token", "content": assistant_message}) + "\n"
+                yield json.dumps({"type": "artifact", "artifact": artifact_data}) + "\n"
+                yield json.dumps({"type": "sources", "sources": sources_list, "retrieved_chunks": retrieved_chunk_ids, "chunk_map": chunk_map_reverse}) + "\n"
+                yield json.dumps({"type": "done", "sources": sources_list, "retrieved_chunks": retrieved_chunk_ids, "chunk_map": chunk_map_reverse, "tokens_used": tokens_used}) + "\n"
+                return
+        else:
+            yield json.dumps({"type": "thinking", "step": "No methodology chunks found, falling back to Path A..."}) + "\n"
+            is_action_planner_query = False
     
     # Path C: Deep Reasoner (Streaming version)
     if is_reasoning_query:
@@ -1747,12 +2120,21 @@ async def chat_stream(
     ]
     is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
     
+    # Detect action planner intent (Path D)
+    action_planner_keywords = [
+        "plan", "schedule", "how to", "how do", "solve", "simulate", "simulation",
+        "script", "routine", "checklist", "steps", "step-by-step", "guide me",
+        "create a", "make a", "build a", "design a", "implement", "methodology",
+        "framework", "process", "procedure", "workflow"
+    ]
+    is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
+    
     global_intent_keywords = [
         "summarize", "summarise", "summary", "overview", "what is this book about",
         "what is the book about", "tell me about this book", "describe this book",
         "what does this book cover", "what is the book about", "book summary"
     ]
-    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query
+    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
     
     def generate_stream():
         for event in stream_chat_response(
@@ -1767,6 +2149,7 @@ async def chat_stream(
             user_message_lower=user_message_lower,
             is_reasoning_query=is_reasoning_query,
             is_global_query=is_global_query,
+            is_action_planner_query=is_action_planner_query,
             is_name_question=is_name_question
         ):
             yield event

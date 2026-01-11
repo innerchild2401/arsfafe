@@ -1,5 +1,9 @@
 "use client"
 
+import { useState } from 'react'
+import ViewSwitcher from './ViewSwitcher'
+import ArtifactRenderer from './ArtifactRenderer'
+
 // Using inline SVG instead of lucide-react for consistency
 
 interface ChunkViewerPanelProps {
@@ -25,19 +29,44 @@ interface ChunkViewerPanelProps {
     } | null
   } | null
   loading?: boolean
+  artifact?: {
+    artifact_type: 'checklist' | 'notebook' | 'script'
+    title: string
+    content: any
+    citations?: string[]
+    variables?: Record<string, string>
+  } | null
 }
 
-export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading }: ChunkViewerPanelProps) {
-  if (!chunkId && !chunkData) return null
+export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading, artifact }: ChunkViewerPanelProps) {
+  const [view, setView] = useState<'inspector' | 'composer'>(
+    artifact ? 'composer' : 'inspector'
+  )
+
+  // If we have an artifact but no chunk, default to composer view
+  if (artifact && !chunkId && !chunkData) {
+    return (
+      <div className="h-full w-full md:w-96 lg:w-[32rem] bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-2xl">
+        <ArtifactRenderer artifact={artifact} />
+      </div>
+    )
+  }
+
+  if (!chunkId && !chunkData && !artifact) return null
 
   return (
     <div className="h-full w-full md:w-96 lg:w-[32rem] bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-2xl">
-      {/* Header */}
+      {/* Header with Switcher */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
-        <h2 className="text-sm font-semibold text-zinc-50 font-mono">Chunk Viewer</h2>
+        <div className="flex items-center gap-3 flex-1">
+          <h2 className="text-sm font-semibold text-zinc-50 font-mono">Workbench</h2>
+          {artifact && (
+            <ViewSwitcher view={view} onViewChange={setView} />
+          )}
+        </div>
         <button
           onClick={onClose}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors flex-shrink-0"
           aria-label="Close panel"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -46,8 +75,12 @@ export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading 
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto overscroll-contain p-4">
+      {/* Content - Polymorphic Canvas */}
+      <div className="flex-1 overflow-hidden">
+        {view === 'composer' && artifact ? (
+          <ArtifactRenderer artifact={artifact} />
+        ) : (
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4">
         {loading ? (
           <div className="space-y-4">
             <div className="h-6 bg-zinc-800 rounded shimmer w-3/4" />
@@ -149,6 +182,8 @@ export default function ChunkViewerPanel({ chunkId, onClose, chunkData, loading 
         ) : (
           <div className="text-center py-12">
             <div className="text-sm text-zinc-400">Chunk not found</div>
+          </div>
+        )}
           </div>
         )}
       </div>
