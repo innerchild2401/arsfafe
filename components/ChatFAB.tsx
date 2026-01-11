@@ -97,7 +97,11 @@ export default function ChatFAB() {
           
           {/* Chat Content - flex-1 min-h-0 allows scrolling to work */}
           <div className="flex-1 min-h-0 flex flex-col">
-            <QuantumChat selectedBookId={selectedBookId} books={books} />
+            <QuantumChat 
+              selectedBookId={selectedBookId} 
+              books={books}
+              onArtifactClick={() => setIsOpen(false)}  // Close drawer when artifact is clicked on mobile
+            />
           </div>
         </DrawerContent>
       </Drawer>

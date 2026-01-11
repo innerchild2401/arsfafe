@@ -27,6 +27,7 @@ interface Message {
 interface QuantumChatProps {
   selectedBookId: string | null
   books: any[]
+  onArtifactClick?: () => void  // Callback for mobile drawer to close when artifact is clicked
 }
 
 interface ChunkData {
@@ -49,7 +50,7 @@ interface ChunkData {
   } | null
 }
 
-export default function QuantumChat({ selectedBookId, books }: QuantumChatProps) {
+export default function QuantumChat({ selectedBookId, books, onArtifactClick }: QuantumChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -444,6 +445,10 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
                               onClick={() => {
                                 setPanelOpen(true)
                                 setSelectedChunkId(null)  // Clear chunk selection to show artifact
+                                // On mobile, close the drawer when artifact is clicked
+                                if (onArtifactClick) {
+                                  onArtifactClick()
+                                }
                               }}
                             >
                               <div className="flex items-center gap-2">
