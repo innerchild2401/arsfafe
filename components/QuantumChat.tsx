@@ -51,6 +51,7 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
   const [chunkData, setChunkData] = useState<ChunkData | null>(null)
   const [chunkLoading, setChunkLoading] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [thinkingStep, setThinkingStep] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
@@ -120,6 +121,7 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
     setInput('')
     setLoading(true)
     setError(null)
+    setThinkingStep(null)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -130,7 +132,8 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
 
       const backendUrl = getBackendUrl()
 
-      const response = await fetch(`${backendUrl}/api/chat`, {
+      // Use streaming endpoint
+      const response = await fetch(`${backendUrl}/api/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -147,22 +150,97 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
         throw new Error(errorData.detail || `Chat failed: ${response.statusText}`)
       }
 
-      const data = await response.json()
-
+      // Create assistant message placeholder
+      const assistantMessageId = Date.now()
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.response,
-        sources: data.sources,
-        retrieved_chunks: data.retrieved_chunks || [],
-        chunk_map: data.chunk_map || {},  // Store chunk_map for citation mapping
+        content: '',
+        sources: [],
+        retrieved_chunks: [],
+        chunk_map: {},
         timestamp: new Date()
       }
-
       setMessages(prev => [...prev, assistantMessage])
+
+      // Stream response
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullContent = ''
+      let finalSources: string[] = []
+      let finalChunkMap: Record<string, string> = {}
+
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+
+          try {
+            const event = JSON.parse(line)
+
+            switch (event.type) {
+              case 'thinking':
+                setThinkingStep(event.step)
+                break
+
+              case 'token':
+                fullContent += event.content
+                // Update message content in real-time
+                setMessages(prev => prev.map((msg, idx) => 
+                  idx === prev.length - 1 && msg.role === 'assistant'
+                    ? { ...msg, content: fullContent }
+                    : msg
+                ))
+                break
+
+              case 'citation':
+                // Citations are already in the content stream, this is just for logging
+                // The citation parsing happens in parseCitations function
+                break
+
+              case 'done':
+                finalSources = event.sources || []
+                finalChunkMap = event.chunk_map || {}
+                // Update message with final metadata
+                setMessages(prev => prev.map((msg, idx) => 
+                  idx === prev.length - 1 && msg.role === 'assistant'
+                    ? { 
+                        ...msg, 
+                        content: fullContent,
+                        sources: finalSources,
+                        chunk_map: finalChunkMap,
+                        retrieved_chunks: event.retrieved_chunks || []
+                      }
+                    : msg
+                ))
+                break
+
+              case 'error':
+                throw new Error(event.message || 'Streaming error')
+            }
+          } catch (parseError) {
+            console.error('Error parsing stream event:', parseError, line)
+          }
+        }
+      }
+
+      setThinkingStep(null)
       
     } catch (error: any) {
       setError(error.message || 'Failed to send message')
       setMessages(prev => prev.slice(0, -1))
+      setThinkingStep(null)
     } finally {
       setLoading(false)
     }
@@ -357,11 +435,18 @@ export default function QuantumChat({ selectedBookId, books }: QuantumChatProps)
                 </div>
                 <div className="flex-1 max-w-[85%]">
                   <div className="ml-4 pl-4 bg-zinc-900/50 rounded-lg p-4 border-l-2 border-emerald-500/30">
-                    <div className="space-y-2">
-                      <div className="h-4 bg-zinc-800 rounded shimmer w-3/4" />
-                      <div className="h-4 bg-zinc-800 rounded shimmer w-1/2" />
-                      <div className="h-4 bg-zinc-800 rounded shimmer w-5/6" />
-                    </div>
+                    {thinkingStep ? (
+                      <div className="text-sm text-zinc-400 italic animate-pulse flex items-center gap-2">
+                        <span className="animate-spin">💭</span>
+                        <span>{thinkingStep}</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="h-4 bg-zinc-800 rounded shimmer w-3/4" />
+                        <div className="h-4 bg-zinc-800 rounded shimmer w-1/2" />
+                        <div className="h-4 bg-zinc-800 rounded shimmer w-5/6" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

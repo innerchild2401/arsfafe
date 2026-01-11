@@ -2,10 +2,13 @@
 Chat endpoints for knowledge center
 """
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import datetime
 from openai import OpenAI
+import json
+import asyncio
 
 from app.database import get_supabase_client, get_supabase_admin_client
 from app.dependencies import get_current_user, check_usage_limits
@@ -15,6 +18,94 @@ from app.services.chunk_utils import generate_chunk_id, get_parent_context_for_c
 from app.config import settings
 
 router = APIRouter()
+
+def get_conversation_history(supabase, user_id: str, book_id: Optional[str], limit: int = 6) -> List[dict]:
+    """
+    Get last N messages from conversation history (last 3 turn pairs = 6 messages)
+    Returns messages ordered by created_at DESC (most recent first)
+    """
+    query = supabase.table("chat_messages").select("*").eq("user_id", user_id)
+    
+    if book_id:
+        query = query.eq("book_id", book_id)
+    
+    result = query.order("created_at", desc=True).limit(limit).execute()
+    messages = result.data if result.data else []
+    
+    # Reverse to get chronological order (oldest first)
+    messages.reverse()
+    return messages
+
+def build_conversation_context(messages: List[dict]) -> str:
+    """
+    Build conversation context string from message pairs
+    Format: User: ... / Assistant: ...
+    """
+    if not messages:
+        return ""
+    
+    context_parts = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "user":
+            context_parts.append(f"User: {content}")
+        elif role == "assistant":
+            context_parts.append(f"Assistant: {content}")
+    
+    return "\n\n".join(context_parts)
+
+async def rewrite_query_with_context(user_message: str, conversation_history: List[dict], client: OpenAI) -> str:
+    """
+    Rewrite user query to de-reference pronouns and contextual references
+    Uses gpt-4o-mini for fast, cheap query rewriting
+    
+    Example:
+    Input: "What happens if we miss that date?" + History
+    Output: "Consequences of missing the $5M bond maturity date in October."
+    """
+    if not conversation_history:
+        return user_message  # No history, no rewrite needed
+    
+    history_text = build_conversation_context(conversation_history)
+    
+    rewrite_prompt = f"""You are a query rewriting assistant. Your job is to rewrite user questions by resolving pronouns and contextual references based on conversation history.
+
+Conversation History:
+{history_text}
+
+Current User Question: {user_message}
+
+Rewrite the question by:
+1. Replacing pronouns (this, that, it, them) with specific entities mentioned in history
+2. Expanding abbreviations to full terms
+3. Clarifying ambiguous references
+4. Making the question self-contained and searchable
+
+Return ONLY the rewritten question, nothing else. Do not add explanations or metadata."""
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.chat_model,  # Use gpt-4o-mini for speed
+            messages=[
+                {"role": "system", "content": "You are a query rewriting assistant. Rewrite questions to be self-contained and searchable."},
+                {"role": "user", "content": rewrite_prompt}
+            ],
+            temperature=0.3,  # Low temperature for consistent rewriting
+            max_tokens=200
+        )
+        
+        rewritten = response.choices[0].message.content.strip()
+        # Only use rewritten if it's meaningfully different and longer (indicates expansion)
+        if len(rewritten) > len(user_message) * 0.8:  # At least 80% of original length
+            print(f"🔄 Query rewrite: '{user_message}' -> '{rewritten}'")
+            return rewritten
+        else:
+            print(f"⚠️ Query rewrite too short, using original: '{rewritten}' -> '{user_message}'")
+            return user_message
+    except Exception as e:
+        print(f"⚠️ Query rewrite failed, using original: {str(e)}")
+        return user_message
 
 class ChatMessage(BaseModel):
     message: str
@@ -116,6 +207,14 @@ async def chat(
     # Path B (Global Query): Pre-computed summaries for general questions
     # Path C (Deep Reasoner): Reasoning model for complex analysis
     
+    # CONVERSATION MEMORY: Fetch last 3 turn pairs (6 messages) for context
+    conversation_history = get_conversation_history(supabase, user_id, chat_message.book_id, limit=6)
+    conversation_context = build_conversation_context(conversation_history)
+    
+    # QUERY REWRITE: De-reference pronouns and contextual references before search
+    client = OpenAI(api_key=settings.openai_api_key)
+    search_query = await rewrite_query_with_context(chat_message.message, conversation_history, client)
+    
     user_message_lower = chat_message.message.lower()
     
     # Detect deep reasoning intent (Analyze, Compare, Why, Connect)
@@ -158,12 +257,18 @@ async def chat(
             # Use the pre-computed summary directly
             client = OpenAI(api_key=settings.openai_api_key)
             
+            # Inject conversation history for context (if available)
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
             system_prompt = f"""You are Zorxido, a helpful AI assistant. The user asked for a high-level summary.
 DO NOT search for specific details.
 I have provided you with a Pre-Computed Executive Summary of the document below.
 Use this summary to answer the user's request in a structured format.
 
-Document Title: {book.get('title', 'Unknown')}
+{history_prefix}Document Title: {book.get('title', 'Unknown')}
 Author: {book.get('author', 'Unknown')}
 
 Executive Summary:
@@ -250,11 +355,17 @@ Instruction: Present this summary in a clear, structured format. If the user ask
                 
                 client = OpenAI(api_key=settings.openai_api_key)
                 
+                # Inject conversation history for context
+                history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+                
                 system_prompt = f"""You are Zorxido. The user asked for a summary of this book.
 I don't have the full text pre-processed, but here is the Table of Contents and the list of topics covered in every section.
 Based on this, infer and present a summary of what this book covers.
 
-Book Title: {book.get('title', 'Unknown')}
+{history_prefix}Book Title: {book.get('title', 'Unknown')}
 Author: {book.get('author', 'Unknown')}
 
 Table of Contents:
@@ -316,54 +427,145 @@ Present this in a clear, informative format."""
     
     # PATH C: Deep Reasoner - Use Reasoning Model for Complex Analysis
     # (Triggers before Path A for Analyze/Compare/Why/Connect queries)
-    if is_reasoning_query and chat_message.book_id:
+    # MAP-REDUCE: For multi-book queries with reasoning intent, use parallel searches per book
+    if is_reasoning_query:
         print(f"🧠 PATH C (Deep Reasoner): Using reasoning model for complex analysis")
         
         # Check for relevant corrections first
         corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
         corrections_context = build_corrections_context(corrections) if corrections else ""
         
-        # Generate query embedding for hybrid search
-        query_embedding = generate_embedding(chat_message.message)
-        
-        # Use higher threshold and more chunks for reasoning queries (need broader context)
-        match_threshold = 0.6
-        match_count = 15  # More chunks for deep analysis
-        
-        # Search for relevant chunks using hybrid search
-        chunks = []
-        try:
-            try:
-                chunks_result = supabase.rpc(
-                    "match_child_chunks_hybrid",
-                    {
-                        "query_embedding": query_embedding,
-                        "query_text": chat_message.message,
-                        "match_threshold": match_threshold,
-                        "match_count": match_count,
-                        "book_ids": book_ids,
-                        "keyword_weight": 0.5,
-                        "vector_weight": 0.5
-                    }
-                ).execute()
-                chunks = chunks_result.data if chunks_result.data else []
-                print(f"🔍 Path C: Hybrid search found {len(chunks)} chunks")
-            except Exception as hybrid_error:
-                print(f"⚠️ Path C: Hybrid search not available, using vector search: {str(hybrid_error)}")
-                chunks_result = supabase.rpc(
-                    "match_child_chunks",
-                    {
-                        "query_embedding": query_embedding,
-                        "match_threshold": match_threshold,
-                        "match_count": match_count,
-                        "book_ids": book_ids
-                    }
-                ).execute()
-                chunks = chunks_result.data if chunks_result.data else []
-                print(f"🔍 Path C: Vector search found {len(chunks)} chunks")
-        except Exception as e:
-            print(f"❌ Path C: Search failed: {str(e)}")
+        # MAP-REDUCE: If multi-book and reasoning intent (Compare/Analyze), use map-reduce
+        book_chunks_map = None  # Will be set if multi-book compare query
+        if not chat_message.book_id and len(book_ids) > 1:
+            # Detect compare/analyze intent for multi-book synthesis
+            compare_keywords = ["compare", "comparison", "contrast", "difference between", "similarities between"]
+            is_compare_query = any(keyword in user_message_lower for keyword in compare_keywords)
+            
+            if is_compare_query:
+                print(f"🔄 MAP-REDUCE: Multi-book compare query detected, using sequential searches per book...")
+                
+                # MAP: Sequential searches per book (Supabase is sync, can't use async.gather)
+                book_chunks_map = {}
+                query_embedding = generate_embedding(search_query)
+                
+                for book_id in book_ids:
+                    try:
+                        chunks_result = supabase.rpc(
+                            "match_child_chunks_hybrid",
+                            {
+                                "query_embedding": query_embedding,
+                                "query_text": search_query,
+                                "match_threshold": 0.6,
+                                "match_count": 5,  # Top 5 per book
+                                "book_ids": [book_id],
+                                "keyword_weight": 0.5,
+                                "vector_weight": 0.5
+                            }
+                        ).execute()
+                        if chunks_result.data:
+                            book_chunks_map[book_id] = chunks_result.data
+                            print(f"🔍 Book {book_id[:8]}: Found {len(chunks_result.data)} chunks")
+                    except Exception as e:
+                        print(f"⚠️ Hybrid search failed for book {book_id}, trying vector search: {str(e)}")
+                        try:
+                            # Fallback to vector search
+                            chunks_result = supabase.rpc(
+                                "match_child_chunks",
+                                {
+                                    "query_embedding": query_embedding,
+                                    "match_threshold": 0.6,
+                                    "match_count": 5,
+                                    "book_ids": [book_id]
+                                }
+                            ).execute()
+                            if chunks_result.data:
+                                book_chunks_map[book_id] = chunks_result.data
+                        except Exception as e2:
+                            print(f"⚠️ Vector search also failed for book {book_id}: {str(e2)}")
+                
+                # REDUCE: Combine all book chunks for synthesis
+                chunks = []
+                for book_id, book_chunks in book_chunks_map.items():
+                    chunks.extend(book_chunks)
+                
+                print(f"🔄 MAP-REDUCE: Retrieved {len(chunks)} chunks from {len(book_chunks_map)} books")
+            else:
+                # Multi-book but not compare - use regular multi-book search
+                query_embedding = generate_embedding(search_query)
+                match_threshold = 0.6
+                match_count = 15
+                
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks_hybrid",
+                        {
+                            "query_embedding": query_embedding,
+                            "query_text": search_query,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids,
+                            "keyword_weight": 0.5,
+                            "vector_weight": 0.5
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                except Exception as hybrid_error:
+                    print(f"⚠️ Path C: Hybrid search not available, using vector search: {str(hybrid_error)}")
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks",
+                        {
+                            "query_embedding": query_embedding,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+        else:
+            # Single book: regular search
+            # Use rewritten query for search (de-referenced pronouns)
+            # Generate query embedding for hybrid search using rewritten query
+            query_embedding = generate_embedding(search_query)  # Use rewritten query, not raw message
+            
+            # Use higher threshold and more chunks for reasoning queries (need broader context)
+            match_threshold = 0.6
+            match_count = 15  # More chunks for deep analysis
+            
+            # Search for relevant chunks using hybrid search
             chunks = []
+            try:
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks_hybrid",
+                        {
+                            "query_embedding": query_embedding,
+                            "query_text": search_query,  # Use rewritten query for keyword search
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids,
+                            "keyword_weight": 0.5,
+                            "vector_weight": 0.5
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                    print(f"🔍 Path C: Hybrid search found {len(chunks)} chunks")
+                except Exception as hybrid_error:
+                    print(f"⚠️ Path C: Hybrid search not available, using vector search: {str(hybrid_error)}")
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks",
+                        {
+                            "query_embedding": query_embedding,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                    print(f"🔍 Path C: Vector search found {len(chunks)} chunks")
+            except Exception as e:
+                print(f"❌ Path C: Search failed: {str(e)}")
+                chunks = []
         
         if not chunks:
             # Fall through to Path A if no chunks found
@@ -411,10 +613,35 @@ Present this in a clear, informative format."""
             context = "\n\n".join(context_parts)
             sources_list = list(set(sources))
             
-            # Investigator System Prompt (Phase 1: Active Conflict Detection)
+            # MAP-REDUCE: Multi-book synthesis instructions
+            # Check for multi-book compare query (book_chunks_map is only set in multi-book compare path)
+            multi_book_suffix = ""
+            if book_chunks_map is not None and len(book_chunks_map) > 1:
+                book_titles = []
+                for book_id in book_chunks_map.keys():
+                    book_result = supabase.table("books").select("title").eq("id", book_id).execute()
+                    if book_result.data:
+                        book_titles.append(book_result.data[0].get("title", f"Book {book_id[:8]}"))
+                
+                multi_book_suffix = f"""
+
+MULTI-BOOK SYNTHESIS (MAP-REDUCE):
+You have retrieved chunks from {len(book_chunks_map)} different books: {', '.join(book_titles[:3])}{'...' if len(book_titles) > 3 else ''}
+- Explicitly contrast information across books
+- Create clear comparisons between different sources  
+- Use table format if comparing structured data (e.g., "Book A: X | Book B: Y")
+- Identify commonalities and differences between sources
+- Cite which book each piece of information comes from using #chk_xxx citations"""
+            
+            # Inject conversation history for context (last 3 turn pairs)
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
             investigator_prompt = f"""You are Zorxido, an expert AI investigator that analyzes information from books with deep reasoning and critical thinking.
 
-{corrections_context}
+{history_prefix}{corrections_context}
 
 CORE INSTRUCTIONS:
 - Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
@@ -449,9 +676,14 @@ ACCURACY AND HONESTY:
 FORMAT:
 - Use structured reasoning: explain your thought process step by step.
 - Cite sources inline as you make claims: "According to #chk_xxx, the revenue grew..."
-- If you detect conflicts, use a clear "CONFLICT DETECTED" section."""
+- If you detect conflicts, use a clear "CONFLICT DETECTED" section.{multi_book_suffix}"""
             
             client = OpenAI(api_key=settings.openai_api_key)
+            
+            # Build user message with conversation context note
+            user_content = f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+            if conversation_context:
+                user_content += f"\n\nNote: This question may reference previous conversation. Use the conversation history above for context."
             
             response = client.chat.completions.create(
                 model=settings.reasoning_model,  # Use GPT-4o for deep reasoning
@@ -462,7 +694,7 @@ FORMAT:
                     },
                     {
                         "role": "user",
-                        "content": f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+                        "content": user_content
                     }
                 ],
                 temperature=0.5  # Balanced for reasoning (not too creative, not too deterministic)
@@ -513,8 +745,9 @@ FORMAT:
     if (not is_global_query or not chat_message.book_id or len(book_ids) > 1) and not is_reasoning_query:
         print(f"🧠 PATH A (Specific Query): Using hybrid search")
         
-        # Generate query embedding
-        query_embedding = generate_embedding(chat_message.message)
+        # Use rewritten query for search (de-referenced pronouns)
+        # Generate query embedding using rewritten query
+        query_embedding = generate_embedding(search_query)  # Use rewritten query, not raw message
         
         # Adjust threshold based on query type
         match_threshold = 0.5 if is_global_query else 0.7
@@ -529,7 +762,7 @@ FORMAT:
                     "match_child_chunks_hybrid",
                     {
                         "query_embedding": query_embedding,
-                        "query_text": chat_message.message,
+                        "query_text": search_query,  # Use rewritten query for keyword search
                         "match_threshold": match_threshold,
                         "match_count": match_count,
                         "book_ids": book_ids,
@@ -739,9 +972,15 @@ FORMAT:
             client = OpenAI(api_key=settings.openai_api_key)
             
             # Phase 1: Investigator System Prompt (Active Conflict Detection)
+            # Inject conversation history for context (last 3 turn pairs)
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
             investigator_prompt = f"""You are Zorxido, an expert AI assistant and investigator that answers questions based on the provided context from books with critical thinking and attention to detail.
 
-{corrections_context}
+{history_prefix}{corrections_context}
 
 CORE INSTRUCTIONS:
 - Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
@@ -777,6 +1016,11 @@ FORMAT:
 - If you detect conflicts, use a clear "CONFLICT DETECTED" section before proceeding.
 - Be thorough but concise."""
             
+            # Build user message with conversation context note
+            user_content = f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+            if conversation_context:
+                user_content += f"\n\nNote: This question may reference previous conversation. Use the conversation history above for context."
+            
             response = client.chat.completions.create(
                 model=settings.chat_model,  # Use gpt-4o-mini for Path A (faster, cheaper)
                 messages=[
@@ -786,7 +1030,7 @@ FORMAT:
                     },
                     {
                         "role": "user",
-                        "content": f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+                        "content": user_content
                     }
                 ],
                 temperature=0.7  # Balanced for general queries
@@ -866,6 +1110,668 @@ async def save_correction(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save correction: {str(e)}")
+
+def stream_chat_response(
+    chat_message: ChatMessage,
+    current_user: dict,
+    supabase,
+    user_id: str,
+    book_ids: List[str],
+    conversation_history: List[dict],
+    conversation_context: str,
+    search_query: str,
+    user_message_lower: str,
+    is_reasoning_query: bool,
+    is_global_query: bool,
+    is_name_question: bool
+):
+    """
+    Stream chat response with thinking steps and token-by-token streaming
+    This is a helper function for the streaming endpoint
+    """
+    import re
+    
+    client = OpenAI(api_key=settings.openai_api_key)
+    
+    # Phase 1: Thinking Steps (Search Phase)
+    yield json.dumps({"type": "thinking", "step": "Analyzing query intent..."}) + "\n"
+    
+    # Handle name questions
+    if is_name_question:
+        yield json.dumps({"type": "thinking", "step": "Direct response (name question)"}) + "\n"
+        assistant_message = "Hello! I'm Zorxido, your AI assistant for exploring your books. I'm here to help you understand and navigate through the content you've uploaded. How can I assist you today?"
+        
+        # Save messages
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "user",
+            "content": chat_message.message,
+            "tokens_used": None,
+            "model_used": None
+        }).execute()
+        
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "assistant",
+            "content": assistant_message,
+            "retrieved_chunks": [],
+            "sources": [],
+            "chunk_map": {},
+            "tokens_used": None,
+            "model_used": "direct_response"
+        }).execute()
+        
+        yield json.dumps({"type": "token", "content": assistant_message}) + "\n"
+        yield json.dumps({"type": "done", "sources": [], "retrieved_chunks": [], "chunk_map": {}, "tokens_used": None}) + "\n"
+        return
+    
+    # Path B: Global Query (Summaries)
+    if is_global_query and chat_message.book_id and len(book_ids) == 1:
+        yield json.dumps({"type": "thinking", "step": "PATH B: Using pre-computed summary..."}) + "\n"
+        
+        book_result = supabase.table("books").select("id, title, author, global_summary").eq("id", chat_message.book_id).execute()
+        
+        if not book_result.data:
+            yield json.dumps({"type": "error", "message": "Book not found"}) + "\n"
+            return
+        
+        book = book_result.data[0]
+        global_summary = book.get("global_summary")
+        
+        if global_summary and global_summary.strip():
+            history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+            
+            system_prompt = f"""You are Zorxido, a helpful AI assistant. The user asked for a high-level summary.
+DO NOT search for specific details.
+I have provided you with a Pre-Computed Executive Summary of the document below.
+Use this summary to answer the user's request in a structured format.
+
+{history_prefix}Document Title: {book.get('title', 'Unknown')}
+Author: {book.get('author', 'Unknown')}
+
+Executive Summary:
+{global_summary}
+
+Instruction: Present this summary in a clear, structured format. If the user asked to "summarize" or asked "what is this book about", provide a comprehensive overview covering: Introduction (overview of the book's purpose), Key Themes (main arguments and concepts), and Conclusion (overall message and takeaways)."""
+            
+            yield json.dumps({"type": "thinking", "step": "Formatting summary with GPT-4o-mini..."}) + "\n"
+            
+            response = client.chat.completions.create(
+                model=settings.chat_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": chat_message.message}
+                ],
+                temperature=0.4,
+                stream=True
+            )
+            
+            full_response = ""
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    yield json.dumps({"type": "token", "content": content}) + "\n"
+            
+            tokens_used = None  # Streaming doesn't provide usage until done
+            
+            # Save messages
+            supabase.table("chat_messages").insert({
+                "user_id": user_id,
+                "book_id": chat_message.book_id,
+                "role": "user",
+                "content": chat_message.message,
+                "tokens_used": None,
+                "model_used": None
+            }).execute()
+            
+            supabase.table("chat_messages").insert({
+                "user_id": user_id,
+                "book_id": chat_message.book_id,
+                "role": "assistant",
+                "content": full_response,
+                "retrieved_chunks": [],
+                "sources": [f"{book.get('title', 'Unknown')} (Executive Summary)"],
+                "chunk_map": {},
+                "tokens_used": tokens_used,
+                "model_used": "global_summary_path_streaming"
+            }).execute()
+            
+            yield json.dumps({"type": "done", "sources": [f"{book.get('title', 'Unknown')} (Executive Summary)"], "retrieved_chunks": [], "chunk_map": {}, "tokens_used": tokens_used}) + "\n"
+            return
+    
+    # Path C: Deep Reasoner (Streaming version)
+    if is_reasoning_query:
+        yield json.dumps({"type": "thinking", "step": "PATH C: Deep Reasoner - Analyzing complex query..."}) + "\n"
+        
+        corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
+        corrections_context = build_corrections_context(corrections) if corrections else ""
+        
+        book_chunks_map = None
+        if not chat_message.book_id and len(book_ids) > 1:
+            compare_keywords = ["compare", "comparison", "contrast", "difference between", "similarities between"]
+            is_compare_query = any(keyword in user_message_lower for keyword in compare_keywords)
+            
+            if is_compare_query:
+                yield json.dumps({"type": "thinking", "step": "MAP-REDUCE: Multi-book compare query - searching per book..."}) + "\n"
+                
+                book_chunks_map = {}
+                query_embedding = generate_embedding(search_query)
+                
+                for i, book_id in enumerate(book_ids):
+                    yield json.dumps({"type": "thinking", "step": f"Searching book {i+1}/{len(book_ids)}..."}) + "\n"
+                    try:
+                        chunks_result = supabase.rpc(
+                            "match_child_chunks_hybrid",
+                            {
+                                "query_embedding": query_embedding,
+                                "query_text": search_query,
+                                "match_threshold": 0.6,
+                                "match_count": 5,
+                                "book_ids": [book_id],
+                                "keyword_weight": 0.5,
+                                "vector_weight": 0.5
+                            }
+                        ).execute()
+                        if chunks_result.data:
+                            book_chunks_map[book_id] = chunks_result.data
+                    except Exception as e:
+                        print(f"⚠️ Search failed for book {book_id}: {str(e)}")
+                
+                chunks = []
+                for book_id, book_chunks in book_chunks_map.items():
+                    chunks.extend(book_chunks)
+                
+                yield json.dumps({"type": "thinking", "step": f"Retrieved {len(chunks)} chunks from {len(book_chunks_map)} books"}) + "\n"
+            else:
+                yield json.dumps({"type": "thinking", "step": "Searching across all books..."}) + "\n"
+                query_embedding = generate_embedding(search_query)
+                match_threshold = 0.6
+                match_count = 15
+                
+                try:
+                    chunks_result = supabase.rpc(
+                        "match_child_chunks_hybrid",
+                        {
+                            "query_embedding": query_embedding,
+                            "query_text": search_query,
+                            "match_threshold": match_threshold,
+                            "match_count": match_count,
+                            "book_ids": book_ids,
+                            "keyword_weight": 0.5,
+                            "vector_weight": 0.5
+                        }
+                    ).execute()
+                    chunks = chunks_result.data if chunks_result.data else []
+                except Exception as e:
+                    chunks = []
+        else:
+            yield json.dumps({"type": "thinking", "step": "Generating query embedding..."}) + "\n"
+            query_embedding = generate_embedding(search_query)
+            
+            yield json.dumps({"type": "thinking", "step": "Searching hybrid index (vector + keyword)..."}) + "\n"
+            match_threshold = 0.6
+            match_count = 15
+            
+            try:
+                chunks_result = supabase.rpc(
+                    "match_child_chunks_hybrid",
+                    {
+                        "query_embedding": query_embedding,
+                        "query_text": search_query,
+                        "match_threshold": match_threshold,
+                        "match_count": match_count,
+                        "book_ids": book_ids,
+                        "keyword_weight": 0.5,
+                        "vector_weight": 0.5
+                    }
+                ).execute()
+                chunks = chunks_result.data if chunks_result.data else []
+                yield json.dumps({"type": "thinking", "step": f"Retrieved {len(chunks)} relevant chunks"}) + "\n"
+            except Exception as e:
+                chunks = []
+        
+        if not chunks:
+            yield json.dumps({"type": "error", "message": "No relevant chunks found"}) + "\n"
+            return
+        
+        yield json.dumps({"type": "thinking", "step": "Enhancing chunks with parent context..."}) + "\n"
+        chunks = get_parent_context_for_chunks(chunks, supabase)
+        
+        yield json.dumps({"type": "thinking", "step": "Building context with citations..."}) + "\n"
+        context_parts = []
+        chunk_map_reverse = {}
+        sources = []
+        source_set = set()
+        
+        for chunk in chunks:
+            chunk_id = chunk.get("id")
+            chunk_uuid = str(chunk_id) if chunk_id else ""
+            persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map_reverse)}"
+            chunk_map_reverse[persistent_id] = chunk_uuid
+            
+            context_text = chunk.get("context_text") or chunk.get("parent_text") or chunk.get("text", "")
+            book_title = chunk.get("book_title") or "Unknown Book"
+            chapter = chunk.get("chapter_title") or ""
+            section = chunk.get("section_title") or ""
+            
+            source_parts = [book_title]
+            if chapter:
+                source_parts.append(chapter)
+            if section and section != chapter:
+                source_parts.append(section)
+            
+            source = ", ".join(source_parts)
+            source_key = f"{book_title}|{chapter}|{section}"
+            context_parts.append(f"{persistent_id} {context_text}")
+            
+            if source_key not in source_set:
+                sources.append(source)
+                source_set.add(source_key)
+        
+        context = "\n\n".join(context_parts)
+        sources_list = list(set(sources))
+        
+        multi_book_suffix = ""
+        if book_chunks_map is not None and len(book_chunks_map) > 1:
+            book_titles = []
+            for book_id in book_chunks_map.keys():
+                book_result = supabase.table("books").select("title").eq("id", book_id).execute()
+                if book_result.data:
+                    book_titles.append(book_result.data[0].get("title", f"Book {book_id[:8]}"))
+            
+            multi_book_suffix = f"""
+
+MULTI-BOOK SYNTHESIS (MAP-REDUCE):
+You have retrieved chunks from {len(book_chunks_map)} different books: {', '.join(book_titles[:3])}{'...' if len(book_titles) > 3 else ''}
+- Explicitly contrast information across books
+- Create clear comparisons between different sources  
+- Use table format if comparing structured data (e.g., "Book A: X | Book B: Y")
+- Identify commonalities and differences between sources
+- Cite which book each piece of information comes from using #chk_xxx citations"""
+        
+        history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+        
+        investigator_prompt = f"""You are Zorxido, an expert AI investigator that analyzes information from books with deep reasoning and critical thinking.
+
+{history_prefix}{corrections_context}
+
+CORE INSTRUCTIONS:
+- Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
+- You are an INVESTIGATOR, not just a summarizer. You think critically, analyze relationships, and detect conflicts.
+- ALWAYS cite your sources using the persistent citation format (e.g., #chk_a1b2c3d4) that appears before each chunk.
+
+DEEP REASONING MODE:
+- Don't just summarize the chunks. Explicitly look for:
+  * Contradictions or conflicting information between different chunks
+  * Underlying themes or patterns across chunks
+  * Causal relationships (what leads to what)
+  * Comparisons and contrasts between concepts
+  * Connections and correlations between ideas
+
+CONFLICT DETECTION (CRITICAL):
+- If the retrieved chunks offer multiple potential answers (e.g., two different dates, conflicting explanations, contradictory statements), DO NOT guess.
+- Explicitly list the conflict: "I found conflicting information: In #chk_xxx it says X, but in #chk_yyy it says Y."
+- Ask the user to clarify which source/document version they trust, or if they want you to investigate further.
+
+ACTIVE ANALYSIS:
+- Compare information across chunks: "When comparing #chk_xxx and #chk_yyy, we see..."
+- Identify relationships: "There appears to be a connection between..."
+- Explain causality: "Based on #chk_xxx, this leads to... because..."
+- Highlight patterns: "A recurring theme across multiple chunks is..."
+
+ACCURACY AND HONESTY:
+- If the context doesn't contain enough information to fully answer, say so explicitly.
+- Base your analysis only on the provided chunks. Don't hallucinate.
+- Stay focused on the content from the user's books.
+- If asked about topics not in the books, politely redirect to what you can help with.
+
+FORMAT:
+- Use structured reasoning: explain your thought process step by step.
+- Cite sources inline as you make claims: "According to #chk_xxx, the revenue grew..."
+- If you detect conflicts, use a clear "CONFLICT DETECTED" section.{multi_book_suffix}"""
+        
+        user_content = f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+        if conversation_context:
+            user_content += f"\n\nNote: This question may reference previous conversation. Use the conversation history above for context."
+        
+        yield json.dumps({"type": "thinking", "step": "Consulting Deep Reasoner (GPT-4o)..."}) + "\n"
+        
+        response = client.chat.completions.create(
+            model=settings.reasoning_model,
+            messages=[
+                {"role": "system", "content": investigator_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.5,
+            stream=True
+        )
+        
+        full_response = ""
+        citation_buffer = ""  # Buffer for partial citations
+        
+        yield json.dumps({"type": "thinking", "step": "Streaming response..."}) + "\n"
+        
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                full_response += content
+                citation_buffer += content
+                
+                # Check for complete citations in buffer
+                citation_pattern = r'#chk_[a-f0-9]{8}'
+                matches = list(re.finditer(citation_pattern, citation_buffer, re.IGNORECASE))
+                
+                for match in matches:
+                    citation_text = match.group(0)
+                    # Send citation event for immediate rendering
+                    yield json.dumps({"type": "citation", "text": citation_text}) + "\n"
+                
+                # Keep only last 20 chars in buffer (enough for partial citation)
+                if len(citation_buffer) > 20:
+                    citation_buffer = citation_buffer[-20:]
+                
+                yield json.dumps({"type": "token", "content": content}) + "\n"
+        
+        tokens_used = None  # Streaming doesn't provide usage until done
+        
+        retrieved_chunk_ids = [chunk.get("id") for chunk in chunks if chunk.get("id")]
+        
+        # Save messages
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "user",
+            "content": chat_message.message,
+            "tokens_used": None,
+            "model_used": None
+        }).execute()
+        
+        supabase.table("chat_messages").insert({
+            "user_id": user_id,
+            "book_id": chat_message.book_id,
+            "role": "assistant",
+            "content": full_response,
+            "retrieved_chunks": retrieved_chunk_ids,
+            "sources": sources_list,
+            "chunk_map": chunk_map_reverse,
+            "tokens_used": tokens_used,
+            "model_used": f"deep_reasoner_{settings.reasoning_model}_streaming"
+        }).execute()
+        
+        yield json.dumps({"type": "done", "sources": sources_list, "retrieved_chunks": retrieved_chunk_ids, "chunk_map": chunk_map_reverse, "tokens_used": tokens_used}) + "\n"
+        return
+    
+    # Path A: Hybrid Search (Streaming version - fallback)
+    yield json.dumps({"type": "thinking", "step": "PATH A: Hybrid Search - searching..."}) + "\n"
+    
+    query_embedding = generate_embedding(search_query)
+    match_threshold = 0.5 if is_global_query else 0.7
+    match_count = 10 if is_global_query else 5
+    
+    yield json.dumps({"type": "thinking", "step": "Searching hybrid index (vector + keyword)..."}) + "\n"
+    
+    chunks = []
+    try:
+        chunks_result = supabase.rpc(
+            "match_child_chunks_hybrid",
+            {
+                "query_embedding": query_embedding,
+                "query_text": search_query,
+                "match_threshold": match_threshold,
+                "match_count": match_count,
+                "book_ids": book_ids,
+                "keyword_weight": 0.5,
+                "vector_weight": 0.5
+            }
+        ).execute()
+        chunks = chunks_result.data if chunks_result.data else []
+        yield json.dumps({"type": "thinking", "step": f"Retrieved {len(chunks)} relevant chunks"}) + "\n"
+    except Exception as e:
+        chunks = []
+    
+    if not chunks:
+        yield json.dumps({"type": "error", "message": "No chunks found"}) + "\n"
+        return
+    
+    yield json.dumps({"type": "thinking", "step": "Enhancing chunks with parent context..."}) + "\n"
+    corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
+    corrections_context = build_corrections_context(corrections) if corrections else ""
+    chunks = get_parent_context_for_chunks(chunks, supabase)
+    
+    yield json.dumps({"type": "thinking", "step": "Building context with citations..."}) + "\n"
+    context_parts = []
+    chunk_map_reverse = {}
+    sources = []
+    source_set = set()
+    
+    for chunk in chunks:
+        chunk_id = chunk.get("id")
+        chunk_uuid = str(chunk_id) if chunk_id else ""
+        persistent_id = generate_chunk_id(chunk_uuid) if chunk_uuid else f"#chk_unknown_{len(chunk_map_reverse)}"
+        chunk_map_reverse[persistent_id] = chunk_uuid
+        
+        context_text = chunk.get("context_text") or chunk.get("parent_text") or chunk.get("text", "")
+        book_title = chunk.get("book_title") or chunk.get("books", {}).get("title") or "Unknown Book"
+        chapter = chunk.get("chapter_title") or (chunk.get("parent_chunks") or {}).get("chapter_title") or ""
+        section = chunk.get("section_title") or (chunk.get("parent_chunks") or {}).get("section_title") or ""
+        
+        source_parts = [book_title]
+        if chapter:
+            source_parts.append(chapter)
+        if section and section != chapter:
+            source_parts.append(section)
+        
+        source = ", ".join(source_parts)
+        source_key = f"{book_title}|{chapter}|{section}"
+        context_parts.append(f"{persistent_id} {context_text}")
+        
+        if source_key not in source_set:
+            sources.append(source)
+            source_set.add(source_key)
+    
+    context = "\n\n".join(context_parts)
+    sources_list = list(set(sources))
+    
+    history_prefix = f"""Previous conversation context:
+{conversation_context}
+
+""" if conversation_context else ""
+    
+    investigator_prompt = f"""You are Zorxido, an expert AI assistant and investigator that answers questions based on the provided context from books with critical thinking and attention to detail.
+
+{history_prefix}{corrections_context}
+
+CORE INSTRUCTIONS:
+- Your name is Zorxido. When asked about your name, always respond that you are Zorxido.
+- You are designed to help users understand and explore their uploaded books.
+- ALWAYS cite your sources using the persistent citation format (e.g., #chk_a1b2c3d4) that appears before each chunk in the context.
+
+INVESTIGATOR MODE:
+- You are an ACTIVE INVESTIGATOR, not just a passive summarizer.
+- Don't just summarize the chunks. Look for:
+  * Contradictions or conflicting information between different chunks
+  * Underlying themes or patterns across chunks
+  * Connections and relationships between ideas
+  * Multiple perspectives on the same topic
+
+CONFLICT DETECTION (CRITICAL):
+- If the retrieved chunks offer multiple potential answers (e.g., two different dates for an event, conflicting explanations, contradictory statements), DO NOT guess.
+- Explicitly list the conflict: "I found conflicting information: In #chk_xxx it says X, but in #chk_yyy it says Y."
+- Ask the user to clarify which document version they trust, or if they want you to investigate further.
+- This builds massive trust - users will think "Wow, it spotted a conflict I missed."
+
+ACCURACY AND HONESTY:
+- Use the context provided to answer questions. If the user asks to "summarise" or "summarize" a book, provide a comprehensive summary based on all the context provided.
+- If the context doesn't contain enough information to fully answer a question, explicitly state what information is missing and answer based on what is available.
+- Mention that your answer is based on the provided context.
+- Stay focused on the content from the user's books. If asked about topics not in the books, politely redirect to what you can help with based on their uploaded content.
+
+CITATION FORMAT:
+- Always cite sources inline as you make claims: "According to #chk_xxx, the revenue grew..."
+- For general questions like "summarise this book", use all the provided context to create a comprehensive summary with proper citations throughout.
+
+FORMAT:
+- Use structured reasoning when appropriate: explain your thought process step by step.
+- If you detect conflicts, use a clear "CONFLICT DETECTED" section before proceeding.
+- Be thorough but concise."""
+    
+    user_content = f"Context from books:\n\n{context}\n\nQuestion: {chat_message.message}"
+    if conversation_context:
+        user_content += f"\n\nNote: This question may reference previous conversation. Use the conversation history above for context."
+    
+    yield json.dumps({"type": "thinking", "step": "Generating response with GPT-4o-mini..."}) + "\n"
+    
+    response = client.chat.completions.create(
+        model=settings.chat_model,
+        messages=[
+            {"role": "system", "content": investigator_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        temperature=0.7,
+        stream=True
+    )
+    
+    full_response = ""
+    citation_buffer = ""
+    
+    yield json.dumps({"type": "thinking", "step": "Streaming response..."}) + "\n"
+    
+    for chunk in response:
+        if chunk.choices[0].delta.content:
+            content = chunk.choices[0].delta.content
+            full_response += content
+            citation_buffer += content
+            
+            # Check for complete citations in buffer
+            citation_pattern = r'#chk_[a-f0-9]{8}'
+            matches = list(re.finditer(citation_pattern, citation_buffer, re.IGNORECASE))
+            
+            for match in matches:
+                citation_text = match.group(0)
+                yield json.dumps({"type": "citation", "text": citation_text}) + "\n"
+            
+            # Keep only last 20 chars in buffer
+            if len(citation_buffer) > 20:
+                citation_buffer = citation_buffer[-20:]
+            
+            yield json.dumps({"type": "token", "content": content}) + "\n"
+    
+    tokens_used = None
+    retrieved_chunk_ids = [chunk.get("id") for chunk in chunks if chunk.get("id")]
+    
+    # Save messages
+    supabase.table("chat_messages").insert({
+        "user_id": user_id,
+        "book_id": chat_message.book_id,
+        "role": "user",
+        "content": chat_message.message,
+        "tokens_used": None,
+        "model_used": None
+    }).execute()
+    
+    supabase.table("chat_messages").insert({
+        "user_id": user_id,
+        "book_id": chat_message.book_id,
+        "role": "assistant",
+        "content": full_response,
+        "retrieved_chunks": retrieved_chunk_ids,
+        "sources": sources_list,
+        "chunk_map": chunk_map_reverse,
+        "tokens_used": tokens_used,
+        "model_used": f"investigator_{settings.chat_model}_streaming"
+    }).execute()
+    
+    yield json.dumps({"type": "done", "sources": sources_list, "retrieved_chunks": retrieved_chunk_ids, "chunk_map": chunk_map_reverse, "tokens_used": tokens_used}) + "\n"
+
+
+@router.post("/stream")
+async def chat_stream(
+    chat_message: ChatMessage,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Streaming chat endpoint with thinking steps and token-by-token streaming
+    
+    Returns Server-Sent Events (SSE) stream with:
+    - "thinking" events: Search steps ("Searching hybrid index...", "Consulting Deep Reasoner...")
+    - "token" events: Individual tokens from OpenAI stream
+    - "citation" events: Citations detected in stream (#chk_xxxx)
+    - "done" event: Streaming complete with metadata (sources, chunk_map, tokens_used)
+    """
+    # Check usage limits
+    check_usage_limits(current_user, "chat")
+    
+    supabase = get_supabase_admin_client()
+    user_id = current_user["id"]
+    
+    # Get user's accessible books
+    if chat_message.book_id:
+        book_ids = [chat_message.book_id]
+    else:
+        access_result = supabase.table("user_book_access").select("book_id").eq("user_id", user_id).eq("is_visible", True).execute()
+        book_ids = [access["book_id"] for access in access_result.data]
+    
+    if not book_ids:
+        async def error_stream():
+            yield json.dumps({"type": "error", "message": "No books available. Please upload a book first."}) + "\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    user_message_lower = chat_message.message.lower()
+    name_questions = ["what is your name", "who are you", "what's your name", "what are you called", "tell me your name"]
+    is_name_question = any(question in user_message_lower for question in name_questions)
+    
+    # CONVERSATION MEMORY: Fetch last 3 turn pairs
+    conversation_history = get_conversation_history(supabase, user_id, chat_message.book_id, limit=6)
+    conversation_context = build_conversation_context(conversation_history)
+    
+    # QUERY REWRITE: De-reference pronouns
+    client = OpenAI(api_key=settings.openai_api_key)
+    search_query = await rewrite_query_with_context(chat_message.message, conversation_history, client)
+    
+    # Intent detection
+    reasoning_intent_keywords = [
+        "analyze", "analyse", "analysis", "compare", "comparison", "contrast",
+        "why", "how does", "how is", "how are", "what causes", "what leads to",
+        "connect", "connection", "relationship", "relate", "correlate",
+        "explain why", "what is the relationship", "what is the connection",
+        "difference between", "similarities between", "distinguish"
+    ]
+    is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
+    
+    global_intent_keywords = [
+        "summarize", "summarise", "summary", "overview", "what is this book about",
+        "what is the book about", "tell me about this book", "describe this book",
+        "what does this book cover", "what is the book about", "book summary"
+    ]
+    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query
+    
+    def generate_stream():
+        for event in stream_chat_response(
+            chat_message=chat_message,
+            current_user=current_user,
+            supabase=supabase,
+            user_id=user_id,
+            book_ids=book_ids,
+            conversation_history=conversation_history,
+            conversation_context=conversation_context,
+            search_query=search_query,
+            user_message_lower=user_message_lower,
+            is_reasoning_query=is_reasoning_query,
+            is_global_query=is_global_query,
+            is_name_question=is_name_question
+        ):
+            yield event
+    
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 @router.get("/history")
 async def get_chat_history(
