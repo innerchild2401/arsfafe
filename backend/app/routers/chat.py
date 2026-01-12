@@ -2288,8 +2288,39 @@ FORMAT:
         chunks = []
     
     if not chunks:
-        yield json.dumps({"type": "error", "message": "No chunks found"}) + "\n"
-        return
+        # Try to get any chunks from the book, even without embeddings
+        yield json.dumps({"type": "thinking", "step": "No matching chunks found. Trying to retrieve any available content..."}) + "\n"
+        try:
+            for book_id in book_ids:
+                chunks_result = supabase.table("child_chunks").select(
+                    "id, text, parent_id, book_id, paragraph_index, page_number, parent_chunks(chapter_title, section_title), books(title)"
+                ).eq("book_id", book_id).limit(10).execute()
+                
+                if chunks_result.data:
+                    formatted_chunks = []
+                    for chunk in chunks_result.data:
+                        parent = chunk.get("parent_chunks") or {}
+                        book = chunk.get("books") or {}
+                        formatted_chunks.append({
+                            "id": chunk["id"],
+                            "text": chunk["text"],
+                            "parent_id": chunk["parent_id"],
+                            "book_id": chunk["book_id"],
+                            "paragraph_index": chunk.get("paragraph_index"),
+                            "page_number": chunk.get("page_number"),
+                            "chapter_title": parent.get("chapter_title", ""),
+                            "section_title": parent.get("section_title", ""),
+                            "book_title": book.get("title", "Unknown Book"),
+                            "similarity": 0.5
+                        })
+                    chunks.extend(formatted_chunks)
+                    break  # Found chunks, no need to check other books
+        except Exception as e:
+            print(f"⚠️ Fallback chunk retrieval failed: {str(e)}")
+        
+        if not chunks:
+            yield json.dumps({"type": "error", "message": "No content found in this book. The book may still be processing or may not have any readable content."}) + "\n"
+            return
     
     yield json.dumps({"type": "thinking", "step": "Enhancing chunks with parent context..."}) + "\n"
     corrections = get_relevant_corrections(user_id, chat_message.message, chat_message.book_id, limit=3)
