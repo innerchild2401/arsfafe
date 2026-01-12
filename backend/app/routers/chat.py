@@ -1734,14 +1734,20 @@ def stream_chat_response(
     if is_global_query and chat_message.book_id and len(book_ids) == 1:
         yield json.dumps({"type": "thinking", "step": "PATH B: Using pre-computed summary..."}) + "\n"
         
+        print(f"✅ Path B triggered for book_id: {chat_message.book_id}")
         book_result = supabase.table("books").select("id, title, author, global_summary").eq("id", chat_message.book_id).execute()
         
         if not book_result.data:
+            print(f"❌ Book not found: {chat_message.book_id}")
             yield json.dumps({"type": "error", "message": "Book not found"}) + "\n"
             return
         
         book = book_result.data[0]
         global_summary = book.get("global_summary")
+        
+        print(f"📋 Book: {book.get('title', 'Unknown')}")
+        print(f"📋 global_summary exists: {global_summary is not None}")
+        print(f"📋 global_summary length: {len(global_summary) if global_summary else 0}")
         
         if global_summary and global_summary.strip():
             history_prefix = f"""Previous conversation context:
@@ -1809,6 +1815,7 @@ Instruction: Present this summary in a clear, structured format. If the user ask
             return
         else:
             # No pre-computed summary available - fall back to chunk search
+            print(f"⚠️ Path B: No global_summary found for book {chat_message.book_id}, falling back to chunk search")
             yield json.dumps({"type": "thinking", "step": "No pre-computed summary found. Searching book content..."}) + "\n"
             # Continue to Path A (chunk search) below
     
@@ -2609,11 +2616,26 @@ async def chat_stream(
     is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
     
     global_intent_keywords = [
-        "summarize", "summarise", "summary", "overview", "what is this book about",
-        "what is the book about", "tell me about this book", "describe this book",
-        "what does this book cover", "what is the book about", "book summary"
+        "summarize", "summarise", "summary", "overview", 
+        "what is this book about", "what is the book about", "what was the book about",
+        "what's this book about", "what's the book about", "what was this book about",
+        "tell me about this book", "describe this book", "describe the book",
+        "what does this book cover", "what does the book cover", "book summary",
+        "what is it about", "what was it about", "what's it about"
     ]
     is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
+    
+    # Debug logging for Path B detection
+    if any(kw in user_message_lower for kw in ["book about", "book summary", "summarize", "overview"]):
+        print(f"🔍 Path B Detection Debug:")
+        print(f"   Query: '{chat_message.message}'")
+        print(f"   Lower: '{user_message_lower}'")
+        print(f"   book_id: {chat_message.book_id}")
+        print(f"   book_ids: {book_ids}")
+        print(f"   len(book_ids): {len(book_ids)}")
+        print(f"   is_global_query: {is_global_query}")
+        print(f"   is_reasoning_query: {is_reasoning_query}")
+        print(f"   is_action_planner_query: {is_action_planner_query}")
     
     def generate_stream():
         try:
