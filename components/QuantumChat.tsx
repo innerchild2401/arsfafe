@@ -251,10 +251,29 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
                 break
 
               case 'error':
-                throw new Error(event.message || 'Streaming error')
+                // Handle error events gracefully - show to user instead of throwing
+                const errorMessage = event.message || 'Streaming error'
+                setError(errorMessage)
+                setMessages(prev => {
+                  const lastMsg = prev[prev.length - 1]
+                  if (lastMsg && lastMsg.role === 'assistant') {
+                    // Update the last assistant message with error
+                    return prev.map((msg, idx) => 
+                      idx === prev.length - 1 && msg.role === 'assistant'
+                        ? { ...msg, content: msg.content || errorMessage }
+                        : msg
+                    )
+                  }
+                  return prev
+                })
+                // Don't throw - just break out of the loop
+                break
             }
           } catch (parseError) {
-            console.error('Error parsing stream event:', parseError, line)
+            // Only log actual parsing errors, not expected error events
+            if (!line.includes('"type":"error"')) {
+              console.error('Error parsing stream event:', parseError, line)
+            }
           }
         }
       }

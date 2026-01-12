@@ -176,10 +176,12 @@ export default function UploadPage() {
 
       addLog('info', 'Uploading to server...')
 
+      // Don't set Content-Type header - let browser set it with boundary for FormData
       const response = await fetch(`${backendUrl}/api/books/upload`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`
+          // Explicitly NOT setting Content-Type - browser will set it with boundary
         },
         body: formData
       })
