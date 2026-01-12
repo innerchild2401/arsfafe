@@ -2474,6 +2474,78 @@ async def chat_stream(
     name_questions = ["what is your name", "who are you", "what's your name", "what are you called", "tell me your name"]
     is_name_question = any(question in user_message_lower for question in name_questions)
     
+    # Meta-questions about system capabilities (books available, access, etc.)
+    meta_question_keywords = [
+        "what books", "which books", "how many books", "list books", "books available",
+        "books do you have", "books can you", "books can i", "books can access",
+        "cearte carti", "care carti", "cate carti"  # Romanian translations
+    ]
+    is_meta_question = any(keyword in user_message_lower for keyword in meta_question_keywords)
+    
+    # Handle meta-questions about system capabilities (books list, access, etc.)
+    if is_meta_question:
+        async def meta_stream():
+            try:
+                yield json.dumps({"type": "thinking", "step": "Retrieving your accessible books..."}) + "\n"
+                
+                # Get user's books with titles
+                books_result = supabase.table("user_book_access").select("books(id, title, author, status)").eq("user_id", user_id).eq("is_visible", True).execute()
+                accessible_books = []
+                if books_result.data:
+                    for access in books_result.data:
+                        book = access.get("books")
+                        if book and isinstance(book, dict):
+                            accessible_books.append({
+                                "title": book.get("title", "Unknown"),
+                                "author": book.get("author"),
+                                "status": book.get("status", "unknown")
+                            })
+                
+                if accessible_books:
+                    book_count = len(accessible_books)
+                    book_list = "\n".join([f"- {book['title']}" + (f" by {book['author']}" if book.get('author') else "") for book in accessible_books[:10]])
+                    if book_count > 10:
+                        book_list += f"\n... and {book_count - 10} more"
+                    
+                    response_text = f"I have access to {book_count} book{'s' if book_count != 1 else ''}:\n\n{book_list}"
+                else:
+                    response_text = "You don't have any books uploaded yet. Upload a book to get started!"
+                
+                # Stream the response token by token
+                for word in response_text.split():
+                    yield json.dumps({"type": "token", "content": word + " "}) + "\n"
+                
+                # Save messages
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "user",
+                    "content": chat_message.message,
+                    "tokens_used": None,
+                    "model_used": None
+                }).execute()
+                
+                supabase.table("chat_messages").insert({
+                    "user_id": user_id,
+                    "book_id": chat_message.book_id,
+                    "role": "assistant",
+                    "content": response_text,
+                    "retrieved_chunks": [],
+                    "sources": [],
+                    "chunk_map": {},
+                    "tokens_used": None,
+                    "model_used": "meta_question"
+                }).execute()
+                
+                yield json.dumps({"type": "done", "sources": [], "retrieved_chunks": [], "chunk_map": {}, "tokens_used": None}) + "\n"
+            except Exception as e:
+                print(f"❌ Meta question error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                yield json.dumps({"type": "error", "message": f"Error retrieving books: {str(e)}"}) + "\n"
+        
+        return StreamingResponse(meta_stream(), media_type="text/event-stream")
+    
     # CONVERSATION MEMORY: Fetch last 3 turn pairs
     conversation_history = get_conversation_history(supabase, user_id, chat_message.book_id, limit=6)
     conversation_context = build_conversation_context(conversation_history)
