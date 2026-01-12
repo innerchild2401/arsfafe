@@ -54,7 +54,7 @@ export default function KnowledgeCenterPage() {
   }, [searchParams, supabase, router, selectedBookId])
 
   return (
-    <div className="flex h-full bg-zinc-950">
+    <div className="flex h-full bg-zinc-950 min-h-0">
       {/* Context Sidebar - Desktop Only (Hidden on Mobile) */}
       <div className="hidden md:block md:relative flex-shrink-0">
         <ContextSidebar
@@ -65,7 +65,7 @@ export default function KnowledgeCenterPage() {
       </div>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header - Desktop Only */}
         <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
           <h1 className="text-base font-semibold text-zinc-50 truncate">
@@ -76,7 +76,7 @@ export default function KnowledgeCenterPage() {
         </header>
 
         {/* Chat Component - Desktop Only */}
-        <div className="hidden md:block flex-1">
+        <div className="hidden md:block flex-1 min-h-0">
           <QuantumChat selectedBookId={selectedBookId} books={books} />
         </div>
 

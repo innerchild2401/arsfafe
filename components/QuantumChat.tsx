@@ -415,11 +415,11 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
   }
 
   return (
-    <div className="flex flex-1 h-full bg-zinc-950 overflow-hidden">
+    <div className="flex flex-1 h-full bg-zinc-950 overflow-hidden min-h-0">
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Messages Area - Thread Style */}
-        <div className="flex-1 overflow-y-auto overscroll-contain">
+        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
           <div className="max-w-4xl mx-auto px-6 py-8">
             {messages.length === 0 && (
               <div className="flex items-center justify-center min-h-[60vh]">
