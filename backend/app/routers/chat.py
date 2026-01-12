@@ -1807,6 +1807,10 @@ Instruction: Present this summary in a clear, structured format. If the user ask
             
             yield json.dumps({"type": "done", "sources": [f"{book.get('title', 'Unknown')} (Executive Summary)"], "retrieved_chunks": [], "chunk_map": {}, "tokens_used": tokens_used}) + "\n"
             return
+        else:
+            # No pre-computed summary available - fall back to chunk search
+            yield json.dumps({"type": "thinking", "step": "No pre-computed summary found. Searching book content..."}) + "\n"
+            # Continue to Path A (chunk search) below
     
     # Path D: Action Planner (Streaming version)
     if is_action_planner_query:
