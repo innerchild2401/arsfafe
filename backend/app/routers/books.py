@@ -82,6 +82,9 @@ async def upload_book(
         # This ensures the backend can perform all operations regardless of RLS policies
         supabase = get_supabase_admin_client()
         
+        # Initialize retry_mode flag (used when retrying failed book processing)
+        retry_mode = False
+        
         # Check if book already exists
         existing_book = supabase.table("books").select("*").eq("file_hash", file_hash).execute()
         
@@ -91,7 +94,6 @@ async def upload_book(
             book_id = book["id"]
             book_status = book.get("status", "uploaded")
             user_id = current_user["id"]
-            retry_mode = False  # Flag for retry mode - will be set to True if error status and owner retries
             
             # Check if user already has access
             access_check = supabase.table("user_book_access").select("*").eq("user_id", user_id).eq("book_id", book_id).execute()

@@ -2509,22 +2509,28 @@ async def chat_stream(
     is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
     
     def generate_stream():
-        for event in stream_chat_response(
-            chat_message=chat_message,
-            current_user=current_user,
-            supabase=supabase,
-            user_id=user_id,
-            book_ids=book_ids,
-            conversation_history=conversation_history,
-            conversation_context=conversation_context,
-            search_query=search_query,
-            user_message_lower=user_message_lower,
-            is_reasoning_query=is_reasoning_query,
-            is_global_query=is_global_query,
-            is_action_planner_query=is_action_planner_query,
-            is_name_question=is_name_question
-        ):
-            yield event
+        try:
+            for event in stream_chat_response(
+                chat_message=chat_message,
+                current_user=current_user,
+                supabase=supabase,
+                user_id=user_id,
+                book_ids=book_ids,
+                conversation_history=conversation_history,
+                conversation_context=conversation_context,
+                search_query=search_query,
+                user_message_lower=user_message_lower,
+                is_reasoning_query=is_reasoning_query,
+                is_global_query=is_global_query,
+                is_action_planner_query=is_action_planner_query,
+                is_name_question=is_name_question
+            ):
+                yield event
+        except Exception as e:
+            print(f"❌ Stream error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            yield json.dumps({"type": "error", "message": f"Stream error: {str(e)}"}) + "\n"
     
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
