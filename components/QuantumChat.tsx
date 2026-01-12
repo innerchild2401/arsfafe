@@ -26,7 +26,7 @@ interface Message {
 }
 
 interface QuantumChatProps {
-  selectedBookId: string | null
+  selectedBookIds: string[]  // Changed to array for multi-select
   books: any[]
   onArtifactClick?: () => void  // Callback for mobile drawer to close when artifact is clicked
 }
@@ -51,7 +51,7 @@ interface ChunkData {
   } | null
 }
 
-export default function QuantumChat({ selectedBookId, books, onArtifactClick }: QuantumChatProps) {
+export default function QuantumChat({ selectedBookIds, books, onArtifactClick }: QuantumChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -84,8 +84,10 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
         
         if (!session) return
 
+        // For history, use first selected book or all if none selected
+        const historyBookId = selectedBookIds.length === 1 ? selectedBookIds[0] : null
         const response = await fetch(
-          `${backendUrl}/api/chat/history${selectedBookId ? `?book_id=${selectedBookId}` : ''}`,
+          `${backendUrl}/api/chat/history${historyBookId ? `?book_id=${historyBookId}` : ''}`,
           {
             headers: {
               'Authorization': `Bearer ${session.access_token}`
@@ -112,10 +114,10 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
       }
     }
 
-    if (selectedBookId || books.length > 0) {
+    if (selectedBookIds.length > 0 || books.length > 0) {
       loadHistory()
     }
-  }, [selectedBookId, books.length, supabase])
+  }, [selectedBookIds, books.length, supabase])
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -152,7 +154,7 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
         },
         body: JSON.stringify({
           message: userMessage.content,
-          book_id: selectedBookId || null
+          book_ids: selectedBookIds.length > 0 ? selectedBookIds : null  // Send array of book IDs
         })
       })
 
@@ -563,14 +565,14 @@ export default function QuantumChat({ selectedBookId, books, onArtifactClick }: 
                   }
                 }}
                 placeholder="Message Zorxido..."
-                disabled={loading || books.length === 0}
+                disabled={loading || books.length === 0 || selectedBookIds.length === 0}
                 rows={1}
                 className="flex-1 resize-none bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-50 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto' }}
               />
               <button
                 type="submit"
-                disabled={loading || !input.trim() || books.length === 0}
+                disabled={loading || !input.trim() || books.length === 0 || selectedBookIds.length === 0}
                 className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-100 text-zinc-900 hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                 aria-label="Send message"
               >

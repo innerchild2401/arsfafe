@@ -1,6 +1,7 @@
 "use client"
 
 import Link from 'next/link'
+import { Check, Circle } from 'lucide-react'
 
 interface Book {
   id: string
@@ -11,11 +12,12 @@ interface Book {
 
 interface ContextSidebarProps {
   books: Book[]
-  selectedBookId: string | null
-  onSelectBook: (bookId: string | null) => void
+  selectedBookIds: string[]  // Changed to array for multi-select
+  onSelectBook: (bookId: string) => void  // Toggle selection
+  onSelectAll: () => void  // Select/deselect all
 }
 
-export default function ContextSidebar({ books, selectedBookId, onSelectBook }: ContextSidebarProps) {
+export default function ContextSidebar({ books, selectedBookIds, onSelectBook, onSelectAll }: ContextSidebarProps) {
   const getHealthDot = (status: string) => {
     switch (status) {
       case 'ready':
@@ -29,26 +31,43 @@ export default function ContextSidebar({ books, selectedBookId, onSelectBook }: 
     }
   }
 
+  const allSelected = books.length > 0 && selectedBookIds.length === books.length
+  const someSelected = selectedBookIds.length > 0 && selectedBookIds.length < books.length
+
   return (
     <aside className="hidden md:block w-80 border-r border-zinc-800 bg-zinc-900/50 flex flex-col">
       <div className="p-4 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Context</h2>
+        <p className="text-xs text-zinc-500 mt-1">Select one or more books</p>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {/* All Knowledge Base Option */}
         <button
-          onClick={() => onSelectBook(null)}
+          onClick={onSelectAll}
           className={`
-            w-full text-left px-3 py-2 rounded-lg transition-colors
-            ${selectedBookId === null
-              ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+            w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-center gap-3
+            ${allSelected
+              ? 'bg-violet-500/20 border border-violet-500/30 text-violet-400'
               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
             }
           `}
         >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />
+          <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+            {allSelected ? (
+              <div className="w-5 h-5 rounded border-2 border-violet-400 bg-violet-500/20 flex items-center justify-center">
+                <Check className="w-3.5 h-3.5 text-violet-400" />
+              </div>
+            ) : someSelected ? (
+              <div className="w-5 h-5 rounded border-2 border-violet-400/50 bg-violet-500/10 flex items-center justify-center">
+                <div className="w-2 h-2 rounded bg-violet-400/50" />
+              </div>
+            ) : (
+              <div className="w-5 h-5 rounded border-2 border-zinc-600" />
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-1">
+            <Circle className="w-3.5 h-3.5 text-violet-400" />
             <span className="text-sm font-medium">All Knowledge Base</span>
           </div>
         </button>
@@ -73,26 +92,38 @@ export default function ContextSidebar({ books, selectedBookId, onSelectBook }: 
           </div>
         ) : (
           <div className="space-y-1">
-            {books.map((book) => (
-              <button
-                key={book.id}
-                onClick={() => onSelectBook(book.id)}
-                className={`
-                  w-full text-left px-3 py-2 rounded-lg transition-colors
-                  ${selectedBookId === book.id
-                    ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                  }
-                `}
-              >
-                <div className="flex items-center gap-2">
-                  {getHealthDot(book.status)}
-                  <span className="text-sm truncate flex-1">
-                    {book.title || book.original_filename}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {books.map((book) => {
+              const isSelected = selectedBookIds.includes(book.id)
+              return (
+                <button
+                  key={book.id}
+                  onClick={() => onSelectBook(book.id)}
+                  className={`
+                    w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-center gap-3
+                    ${isSelected
+                      ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                      : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                    }
+                  `}
+                >
+                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                    {isSelected ? (
+                      <div className="w-5 h-5 rounded border-2 border-emerald-400 bg-emerald-500/20 flex items-center justify-center">
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      </div>
+                    ) : (
+                      <div className="w-5 h-5 rounded border-2 border-zinc-600" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {getHealthDot(book.status)}
+                    <span className="text-sm truncate">
+                      {book.title || book.original_filename}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

@@ -8,7 +8,7 @@ import ContextSidebar from '@/components/ContextSidebar'
 import { Sparkles } from 'lucide-react'
 
 export default function KnowledgeCenterPage() {
-  const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([])  // Changed to array
   const [books, setBooks] = useState<any[]>([])
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -36,8 +36,12 @@ export default function KnowledgeCenterPage() {
           
           setBooks(readyBooks)
           
-          if (readyBooks.length === 1 && !selectedBookId) {
-            setSelectedBookId(readyBooks[0].id)
+          // Auto-select all books if only one book available
+          if (readyBooks.length === 1 && selectedBookIds.length === 0) {
+            setSelectedBookIds([readyBooks[0].id])
+          } else if (readyBooks.length > 1 && selectedBookIds.length === 0) {
+            // Auto-select all books by default
+            setSelectedBookIds(readyBooks.map((b: any) => b.id))
           }
         }
       } catch (error) {
@@ -49,9 +53,9 @@ export default function KnowledgeCenterPage() {
     
     const bookId = searchParams.get('book')
     if (bookId) {
-      setSelectedBookId(bookId)
+      setSelectedBookIds([bookId])
     }
-  }, [searchParams, supabase, router, selectedBookId])
+  }, [searchParams, supabase, router])
 
   return (
     <div className="flex h-full bg-zinc-950 min-h-0">
@@ -59,8 +63,21 @@ export default function KnowledgeCenterPage() {
       <div className="hidden md:block md:relative flex-shrink-0">
         <ContextSidebar
           books={books}
-          selectedBookId={selectedBookId}
-          onSelectBook={setSelectedBookId}
+          selectedBookIds={selectedBookIds}
+          onSelectBook={(bookId) => {
+            setSelectedBookIds(prev => 
+              prev.includes(bookId) 
+                ? prev.filter(id => id !== bookId)
+                : [...prev, bookId]
+            )
+          }}
+          onSelectAll={() => {
+            if (selectedBookIds.length === books.length) {
+              setSelectedBookIds([])  // Deselect all
+            } else {
+              setSelectedBookIds(books.map(b => b.id))  // Select all
+            }
+          }}
         />
       </div>
 
@@ -69,15 +86,19 @@ export default function KnowledgeCenterPage() {
         {/* Header - Desktop Only */}
         <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
           <h1 className="text-base font-semibold text-zinc-50 truncate">
-            {selectedBookId 
-              ? books.find(b => b.id === selectedBookId)?.title || 'Quantum Chat'
-              : 'All Knowledge Base'}
+            {selectedBookIds.length === 0
+              ? 'No books selected'
+              : selectedBookIds.length === 1
+                ? books.find(b => b.id === selectedBookIds[0])?.title || 'Quantum Chat'
+                : selectedBookIds.length === books.length
+                  ? 'All Knowledge Base'
+                  : `${selectedBookIds.length} books selected`}
           </h1>
         </header>
 
         {/* Chat Component - Desktop Only */}
         <div className="hidden md:block flex-1 min-h-0">
-          <QuantumChat selectedBookId={selectedBookId} books={books} />
+          <QuantumChat selectedBookIds={selectedBookIds} books={books} />
         </div>
 
         {/* Mobile: Empty state with FAB visible */}

@@ -109,7 +109,8 @@ Return ONLY the rewritten question, nothing else. Do not add explanations or met
 
 class ChatMessage(BaseModel):
     message: str
-    book_id: Optional[str] = None  # None = chat across all books
+    book_id: Optional[str] = None  # Deprecated: use book_ids instead
+    book_ids: Optional[List[str]] = None  # Array of book IDs, None = chat across all books
 
 class ChatResponse(BaseModel):
     response: str
@@ -159,11 +160,14 @@ async def chat(
     user_id = current_user["id"]
     
     # Get user's accessible books
-    if chat_message.book_id:
-        # Single book chat
+    if chat_message.book_ids and len(chat_message.book_ids) > 0:
+        # Multi-select: use specified book IDs
+        book_ids = chat_message.book_ids
+    elif chat_message.book_id:
+        # Legacy: single book_id (for backward compatibility)
         book_ids = [chat_message.book_id]
     else:
-        # Multi-book chat (all user's books)
+        # No selection: chat across all user's books
         access_result = supabase.table("user_book_access").select("book_id").eq("user_id", user_id).eq("is_visible", True).execute()
         book_ids = [access["book_id"] for access in access_result.data]
     
@@ -172,6 +176,9 @@ async def chat(
             status_code=400,
             detail="No books available. Please upload a book first."
         )
+    
+    # For database storage: use first book_id if single selection, null if multi
+    message_book_id = book_ids[0] if len(book_ids) == 1 else None
     
     # Check if user is asking about the assistant's name
     user_message_lower = chat_message.message.lower()
@@ -218,7 +225,7 @@ async def chat(
     # Path D (Action Planner): Structured artifacts (schedules, scripts, notebooks) for implementation
     
     # CONVERSATION MEMORY: Fetch last 3 turn pairs (6 messages) for context
-    conversation_history = get_conversation_history(supabase, user_id, chat_message.book_id, limit=6)
+    conversation_history = get_conversation_history(supabase, user_id, message_book_id, limit=6)
     conversation_context = build_conversation_context(conversation_history)
     
     # QUERY REWRITE: De-reference pronouns and contextual references before search
@@ -256,9 +263,9 @@ async def chat(
     
     is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
     
-    # PATH B: Global Query - Use pre-computed summaries
-    if is_global_query and chat_message.book_id and len(book_ids) == 1:
-        print(f"🧠 PATH B (Global Query): Using pre-computed summary for book {chat_message.book_id}")
+    # PATH B: Global Query - Use pre-computed summaries (only works for single book)
+    if is_global_query and len(book_ids) == 1:
+        print(f"🧠 PATH B (Global Query): Using pre-computed summary for book {book_ids[0]}")
         
         # Get book with global_summary
         book_result = supabase.table("books").select("id, title, author, global_summary").eq("id", chat_message.book_id).execute()
@@ -1707,7 +1714,7 @@ def stream_chat_response(
         # Save messages
         supabase.table("chat_messages").insert({
             "user_id": user_id,
-            "book_id": chat_message.book_id,
+            "book_id": message_book_id,
             "role": "user",
             "content": chat_message.message,
             "tokens_used": None,
@@ -1716,7 +1723,7 @@ def stream_chat_response(
         
         supabase.table("chat_messages").insert({
             "user_id": user_id,
-            "book_id": chat_message.book_id,
+            "book_id": message_book_id,
             "role": "assistant",
             "content": assistant_message,
             "retrieved_chunks": [],
@@ -2501,9 +2508,14 @@ async def chat_stream(
     user_id = current_user["id"]
     
     # Get user's accessible books
-    if chat_message.book_id:
+    if chat_message.book_ids and len(chat_message.book_ids) > 0:
+        # Multi-select: use specified book IDs
+        book_ids = chat_message.book_ids
+    elif chat_message.book_id:
+        # Legacy: single book_id (for backward compatibility)
         book_ids = [chat_message.book_id]
     else:
+        # No selection: chat across all user's books
         access_result = supabase.table("user_book_access").select("book_id").eq("user_id", user_id).eq("is_visible", True).execute()
         book_ids = [access["book_id"] for access in access_result.data]
     
