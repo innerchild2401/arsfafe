@@ -13,7 +13,11 @@ export default async function Home() {
     if (user) {
       redirect('/dashboard')
     }
-  } catch (error) {
+  } catch (error: any) {
+    // NEXT_REDIRECT is expected - Next.js uses it internally for redirects
+    if (error?.digest?.startsWith('NEXT_REDIRECT')) {
+      throw error // Re-throw redirect errors so Next.js can handle them
+    }
     console.error('Error initializing Supabase:', error)
     // Continue to show login/signup if there's an error
   }
