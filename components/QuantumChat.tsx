@@ -60,6 +60,7 @@ export default function QuantumChat({ selectedBookIds, books, onArtifactClick }:
   const [chunkData, setChunkData] = useState<ChunkData | null>(null)
   const [chunkLoading, setChunkLoading] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [selectedArtifactMessageId, setSelectedArtifactMessageId] = useState<string | null>(null)  // Track which artifact is selected
   const [thinkingStep, setThinkingStep] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
@@ -334,6 +335,7 @@ export default function QuantumChat({ selectedBookIds, books, onArtifactClick }:
   const handleClosePanel = () => {
     setPanelOpen(false)
     setSelectedChunkId(null)
+    setSelectedArtifactMessageId(null)  // Clear selected artifact when closing
     setChunkData(null)
   }
 
@@ -464,10 +466,13 @@ export default function QuantumChat({ selectedBookIds, books, onArtifactClick }:
                           {/* View Artifact Card (Path D) */}
                           {message.artifact && (
                             <div 
-                              className="mt-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg cursor-pointer hover:bg-violet-500/20 transition-colors"
+                              className={`mt-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg cursor-pointer hover:bg-violet-500/20 transition-colors ${
+                                selectedArtifactMessageId === message.id ? 'ring-2 ring-violet-500/50 bg-violet-500/20' : ''
+                              }`}
                               onClick={() => {
                                 setPanelOpen(true)
                                 setSelectedChunkId(null)  // Clear chunk selection to show artifact
+                                setSelectedArtifactMessageId(message.id || null)  // Track which artifact was clicked
                                 // On mobile, close the drawer when artifact is clicked
                                 if (onArtifactClick) {
                                   onArtifactClick()
@@ -610,7 +615,18 @@ export default function QuantumChat({ selectedBookIds, books, onArtifactClick }:
               onClose={handleClosePanel}
               chunkData={chunkData}
               loading={chunkLoading}
-              artifact={messages.find(m => m.artifact)?.artifact || null}
+              artifact={selectedArtifactMessageId 
+                ? messages.find(m => m.id === selectedArtifactMessageId)?.artifact || null
+                : null}
+              messageId={selectedArtifactMessageId || null}
+              onArtifactUpdate={(updatedArtifact) => {
+                // Update the artifact in the messages array
+                setMessages(prev => prev.map(msg => 
+                  msg.id === selectedArtifactMessageId
+                    ? { ...msg, artifact: updatedArtifact }
+                    : msg
+                ))
+              }}
             />
           </div>
         </>

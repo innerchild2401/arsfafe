@@ -252,7 +252,32 @@ async def chat(
         "create a", "make a", "build a", "design a", "implement", "methodology",
         "framework", "process", "procedure", "workflow"
     ]
-    is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
+    
+    # Check if there's an existing artifact in conversation history (follow-up detection)
+    has_existing_artifact = any(
+        msg.get("artifact") for msg in conversation_history 
+        if msg.get("role") == "assistant" and msg.get("artifact")
+    )
+    
+    # Follow-up question keywords (questions about existing artifacts, not new artifact requests)
+    follow_up_keywords = [
+        "help with", "how do i", "what about", "what is", "explain", "tell me about",
+        "day", "step", "percentage", "determine", "calculate", "figure out",
+        "i need help", "i don't understand", "can you explain", "what does",
+        "how does", "how is", "how are", "when should", "where do"
+    ]
+    
+    is_follow_up_about_artifact = (
+        has_existing_artifact and 
+        any(keyword in user_message_lower for keyword in follow_up_keywords)
+    )
+    
+    # Suppress Path D for follow-up questions about existing artifacts
+    is_action_planner_query = (
+        any(keyword in user_message_lower for keyword in action_planner_keywords) and 
+        not is_reasoning_query and 
+        not is_follow_up_about_artifact  # Don't trigger Path D for follow-ups
+    )
     
     # Detect global intent (summarize, overview, "what is this book about")
     global_intent_keywords = [
@@ -2683,7 +2708,35 @@ async def chat_stream(
         "create a", "make a", "build a", "design a", "implement", "methodology",
         "framework", "process", "procedure", "workflow"
     ]
-    is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
+    
+    # Check if there's an existing artifact in conversation history (follow-up detection)
+    has_existing_artifact = any(
+        msg.get("artifact") for msg in conversation_history 
+        if msg.get("role") == "assistant" and msg.get("artifact")
+    )
+    
+    # Follow-up question keywords (questions about existing artifacts, not new artifact requests)
+    follow_up_keywords = [
+        "help with", "how do i", "what about", "what is", "explain", "tell me about",
+        "day", "step", "percentage", "determine", "calculate", "figure out",
+        "i need help", "i don't understand", "can you explain", "what does",
+        "how does", "how is", "how are", "when should", "where do"
+    ]
+    
+    is_follow_up_about_artifact = (
+        has_existing_artifact and 
+        any(keyword in user_message_lower for keyword in follow_up_keywords)
+    )
+    
+    # Suppress Path D for follow-up questions about existing artifacts
+    is_action_planner_query = (
+        any(keyword in user_message_lower for keyword in action_planner_keywords) and 
+        not is_reasoning_query and 
+        not is_follow_up_about_artifact  # Don't trigger Path D for follow-ups
+    )
+    
+    if is_follow_up_about_artifact:
+        print(f"🔍 Follow-up detected about existing artifact. Suppressing Path D, routing to Path A/B instead.")
     
     global_intent_keywords = [
         "summarize", "summarise", "summary", "overview", 
