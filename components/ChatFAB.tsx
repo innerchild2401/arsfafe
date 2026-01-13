@@ -15,7 +15,7 @@ import QuantumChat from './QuantumChat'
 
 export default function ChatFAB() {
   const [isOpen, setIsOpen] = useState(false)
-  const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([])  // Changed to array
   const [books, setBooks] = useState<any[]>([])
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -39,6 +39,11 @@ export default function ChatFAB() {
             .filter((book: any) => book && book.status === 'ready')
           
           setBooks(readyBooks)
+          
+          // Auto-select all books if available
+          if (readyBooks.length > 0 && selectedBookIds.length === 0) {
+            setSelectedBookIds(readyBooks.map((b: any) => b.id))
+          }
         }
       } catch (error) {
         console.error('Error loading books:', error)
@@ -48,16 +53,17 @@ export default function ChatFAB() {
     loadBooksData()
   }, [supabase])
 
-  // Update selectedBookId from URL params
+  // Update selectedBookIds from URL params
   useEffect(() => {
     const bookId = searchParams.get('book')
     if (bookId && books.find((b: any) => b.id === bookId)) {
-      setSelectedBookId(bookId)
-    } else if (books.length === 1) {
+      setSelectedBookIds([bookId])
+    } else if (books.length === 1 && selectedBookIds.length === 0) {
       // Auto-select if only one book available
-      setSelectedBookId(books[0].id)
-    } else {
-      setSelectedBookId(null)
+      setSelectedBookIds([books[0].id])
+    } else if (books.length > 1 && selectedBookIds.length === 0) {
+      // Auto-select all books by default
+      setSelectedBookIds(books.map((b: any) => b.id))
     }
   }, [searchParams, books])
 
@@ -80,9 +86,13 @@ export default function ChatFAB() {
               <div className="flex-1">
                 <DrawerTitle className="text-zinc-50 font-mono text-sm">Quantum Chat</DrawerTitle>
                 <DrawerDescription className="text-zinc-400 text-xs mt-1">
-                  {selectedBookId 
-                    ? books.find(b => b.id === selectedBookId)?.title || 'Chat with book'
-                    : 'Chat with all books'}
+                  {selectedBookIds.length === 0
+                    ? 'No books selected'
+                    : selectedBookIds.length === 1
+                      ? books.find(b => b.id === selectedBookIds[0])?.title || 'Chat with book'
+                      : selectedBookIds.length === books.length
+                        ? 'Chat with all books'
+                        : `${selectedBookIds.length} books selected`}
                 </DrawerDescription>
               </div>
               <button
@@ -98,7 +108,7 @@ export default function ChatFAB() {
           {/* Chat Content - flex-1 min-h-0 allows scrolling to work */}
           <div className="flex-1 min-h-0 flex flex-col">
             <QuantumChat 
-              selectedBookId={selectedBookId} 
+              selectedBookIds={selectedBookIds} 
               books={books}
               onArtifactClick={() => setIsOpen(false)}  // Close drawer when artifact is clicked on mobile
             />

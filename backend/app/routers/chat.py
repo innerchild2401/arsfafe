@@ -455,8 +455,14 @@ Present this in a clear, informative format."""
     if is_action_planner_query:
         print(f"🧠 PATH D (Action Planner): Generating structured artifact for implementation")
         
+        # Enhance search query with methodology-specific terms to prioritize prescriptive content
+        # Add terms that indicate instructions, steps, procedures (not just descriptions)
+        methodology_terms = ["steps", "procedure", "method", "process", "instructions", "how to", "guide", "framework", "routine", "schedule"]
+        enhanced_query = f"{search_query} {' '.join(methodology_terms)}"
+        
         # Search for methodology/framework/script chunks (Phase 2: Use action metadata prioritization)
-        query_embedding = generate_embedding(search_query)
+        # Use enhanced query for embedding, but original query for keyword search (to avoid dilution)
+        query_embedding = generate_embedding(enhanced_query)
         match_threshold = 0.6
         match_count = 10  # Get more chunks for methodology extraction
         
@@ -555,6 +561,8 @@ Present this in a clear, informative format."""
             
             artifact_prompt = f"""You are an Implementation Architect. Your job is to extract methodologies, frameworks, scripts, or step-by-step procedures from the provided book content and generate a structured, actionable artifact.
 
+CRITICAL OUTPUT REQUIREMENT: You MUST return ONLY valid JSON. No markdown formatting, no code blocks (```json or ```), no explanations, no text outside the JSON object. The response must be directly parseable as JSON by json.loads().
+
 {history_prefix}User Request: {chat_message.message}
 
 Relevant Content from Book:
@@ -562,68 +570,84 @@ Relevant Content from Book:
 
 {corrections_context}
 
+FOCUS ON PRESCRIPTIVE CONTENT (Not Descriptive):
+Prioritize chunks that contain ACTIONABLE instructions:
+- Step-by-step procedures (numbered lists, "Step 1... Step 2...", "First... Then... Finally...")
+- Conditional logic ("if X, then Y", "when A occurs, do B", "in case of C, follow D")
+- Action verbs and imperatives ("do", "perform", "execute", "follow", "apply", "implement")
+- Methodologies, frameworks, or systematic procedures
+- NOT just descriptions, explanations, or background information (those are descriptive, not prescriptive)
+
 Your task:
 1. Identify the methodology, framework, script, or procedure described in the content
-2. Extract the step-by-step instructions, schedules, or computational steps
+2. Extract the step-by-step instructions, schedules, or computational steps (focus on PRESCRIPTIVE content)
 3. Determine the artifact type:
    - "checklist": For routines, schedules, step-by-step guides (e.g., sleep training, workout routines)
    - "notebook": For mathematical derivations, simulations, computational problems (e.g., physics problems, engineering calculations)
    - "script": For conversational scripts, dialogue templates, or interaction patterns
 
-4. Generate a JSON artifact with this exact structure:
+4. Generate a JSON artifact with this EXACT structure (return ONLY the JSON object, no markdown, no code fences):
 {{
   "artifact_type": "checklist" | "notebook" | "script",
   "title": "Short descriptive title",
   "content": {{
-    // For checklist:
-    "steps": [
-      {{"id": "step_1", "time": "7:00 PM", "action": "Bedtime routine", "description": "Detailed instruction", "checked": false}},
-      ...
-    ],
-    // OR for notebook:
-    "cells": [
-      {{"type": "markdown", "content": "Theory explanation"}},
-      {{"type": "code", "language": "python", "content": "code here"}},
-      {{"type": "output", "content": "result"}},
-      ...
-    ],
-    // OR for script:
-    "scenes": [
-      {{"id": "scene_1", "context": "Setting", "speaker": "Parent", "text": "What to say", "action": "What to do"}},
-      ...
-    ]
+    "steps": [{{"id": "step_1", "time": "7:00 PM", "action": "Bedtime routine", "description": "Detailed instruction", "checked": false}}] OR
+    "cells": [{{"type": "markdown", "content": "Theory explanation"}}, {{"type": "code", "language": "python", "content": "code here"}}, {{"type": "output", "content": "result"}}] OR
+    "scenes": [{{"id": "scene_1", "context": "Setting", "speaker": "Parent", "text": "What to say", "action": "What to do"}}]
   }},
   "citations": ["#chk_xxxx", "#chk_yyyy"],
-  "variables": {{"age": "2 years", "duration": "5 minutes"}}  // Extract any variables mentioned
+  "variables": {{"age": "2 years", "duration": "5 minutes"}}
 }}
 
-IMPORTANT:
-- Return ONLY valid JSON, no markdown, no explanations
+CRITICAL REMINDERS:
+- Return ONLY the JSON object, nothing else. No markdown, no code blocks, no explanations.
 - Use the persistent chunk IDs (#chk_xxxx) from the content for citations
 - Make the artifact actionable and specific to the user's request
 - For checklists: Include times, durations, or sequences
 - For notebooks: Include mathematical notation, code, or computational steps
-- For scripts: Include dialogue and actions"""
+- For scripts: Include dialogue and actions
+- Focus on PRESCRIPTIVE content (instructions, steps, procedures) not DESCRIPTIVE content (explanations, background)"""
 
             # Use reasoning model (GPT-4o) for artifact generation
+            # CRITICAL: response_format={"type": "json_object"} forces JSON output (no markdown)
             response = client.chat.completions.create(
                 model=settings.reasoning_model,  # Use GPT-4o for structured generation
                 messages=[
-                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content."},
+                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content. You MUST return ONLY valid JSON, no markdown, no code blocks, no explanations."},
                     {"role": "user", "content": artifact_prompt}
                 ],
                 temperature=0.3,  # Lower temperature for more structured output
-                response_format={"type": "json_object"}  # Force JSON output
+                response_format={"type": "json_object"}  # CRITICAL: Forces JSON output, prevents markdown
             )
             
-            artifact_json_str = response.choices[0].message.content
+            artifact_json_str = response.choices[0].message.content.strip()
             tokens_used = response.usage.total_tokens if response.usage else None
+            
+            # Remove any markdown code fences if they somehow appear (defensive)
+            if artifact_json_str.startswith("```"):
+                # Remove ```json or ``` markers
+                lines = artifact_json_str.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                artifact_json_str = "\n".join(lines).strip()
             
             # Parse and validate JSON
             try:
                 artifact_data = json.loads(artifact_json_str)
-            except json.JSONDecodeError as e:
-                print(f"⚠️ Path D: Failed to parse JSON artifact: {str(e)}")
+                
+                # Validate artifact structure
+                if not isinstance(artifact_data, dict):
+                    raise ValueError("Artifact must be a JSON object")
+                if "artifact_type" not in artifact_data:
+                    raise ValueError("Artifact must have 'artifact_type' field")
+                if "content" not in artifact_data:
+                    raise ValueError("Artifact must have 'content' field")
+                    
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"❌ Path D: Failed to parse/validate artifact JSON: {str(e)}")
+                print(f"   Raw response: {artifact_json_str[:200]}...")
                 # Fall back to Path A
                 is_action_planner_query = False
             else:
@@ -1925,6 +1949,8 @@ Instruction: Present this summary in a clear, structured format. If the user ask
             
             artifact_prompt = f"""You are an Implementation Architect. Extract methodologies, frameworks, scripts, or step-by-step procedures from the provided book content and generate a structured, actionable artifact.
 
+CRITICAL: You MUST return ONLY valid JSON. No markdown formatting, no code blocks, no explanations, no text outside the JSON object. The response must be parseable as JSON.
+
 {history_prefix}User Request: {chat_message.message}
 
 Relevant Content from Book:
@@ -1932,41 +1958,70 @@ Relevant Content from Book:
 
 {corrections_context}
 
-Generate a JSON artifact with this structure:
+FOCUS ON PRESCRIPTIVE CONTENT: Look for chunks that contain:
+- Step-by-step instructions (numbered lists, "first... then... finally")
+- Conditional logic ("if X, then Y", "when A happens, do B")
+- Action verbs ("do", "perform", "execute", "follow", "apply")
+- Methodologies, frameworks, or procedures
+- NOT just descriptions or explanations (those are descriptive, not prescriptive)
+
+Generate a JSON artifact with this EXACT structure (no markdown, no code fences, just raw JSON):
 {{
   "artifact_type": "checklist" | "notebook" | "script",
   "title": "Short descriptive title",
   "content": {{
-    // For checklist: {{"steps": [{{"id": "step_1", "time": "7:00 PM", "action": "...", "description": "...", "checked": false}}]}}
-    // For notebook: {{"cells": [{{"type": "markdown|code|output", "content": "..."}}]}}
-    // For script: {{"scenes": [{{"id": "scene_1", "context": "...", "speaker": "...", "text": "...", "action": "..."}}]}}
+    "steps": [{{"id": "step_1", "time": "7:00 PM", "action": "...", "description": "...", "checked": false}}] OR
+    "cells": [{{"type": "markdown|code|output", "content": "..."}}] OR
+    "scenes": [{{"id": "scene_1", "context": "...", "speaker": "...", "text": "...", "action": "..."}}]
   }},
   "citations": ["#chk_xxxx"],
   "variables": {{}}
 }}
 
-Return ONLY valid JSON, no markdown."""
+REMEMBER: Return ONLY the JSON object, nothing else. No markdown, no explanations, no code blocks."""
             
             yield json.dumps({"type": "thinking", "step": "Generating structured artifact with GPT-4o..."}) + "\n"
             
             # Use reasoning model for artifact generation
+            # CRITICAL: response_format={"type": "json_object"} forces JSON output (no markdown)
             response = client.chat.completions.create(
                 model=settings.reasoning_model,
                 messages=[
-                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content."},
+                    {"role": "system", "content": "You are an Implementation Architect. Generate structured JSON artifacts from book content. You MUST return ONLY valid JSON, no markdown, no code blocks, no explanations."},
                     {"role": "user", "content": artifact_prompt}
                 ],
                 temperature=0.3,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"}  # CRITICAL: Forces JSON output, prevents markdown
             )
             
-            artifact_json_str = response.choices[0].message.content
+            artifact_json_str = response.choices[0].message.content.strip()
             tokens_used = response.usage.total_tokens if response.usage else None
+            
+            # Remove any markdown code fences if they somehow appear (defensive)
+            if artifact_json_str.startswith("```"):
+                # Remove ```json or ``` markers
+                lines = artifact_json_str.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                artifact_json_str = "\n".join(lines).strip()
             
             try:
                 artifact_data = json.loads(artifact_json_str)
-            except json.JSONDecodeError as e:
-                yield json.dumps({"type": "error", "message": f"Failed to parse artifact JSON: {str(e)}"}) + "\n"
+                
+                # Validate artifact structure
+                if not isinstance(artifact_data, dict):
+                    raise ValueError("Artifact must be a JSON object")
+                if "artifact_type" not in artifact_data:
+                    raise ValueError("Artifact must have 'artifact_type' field")
+                if "content" not in artifact_data:
+                    raise ValueError("Artifact must have 'content' field")
+                    
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"❌ Path D: Failed to parse/validate artifact JSON: {str(e)}")
+                print(f"   Raw response: {artifact_json_str[:200]}...")
+                yield json.dumps({"type": "error", "message": f"Failed to generate valid artifact: {str(e)}"}) + "\n"
                 # Fall back to Path A
                 is_action_planner_query = False
             else:
@@ -2523,6 +2578,9 @@ async def chat_stream(
         async def error_stream():
             yield json.dumps({"type": "error", "message": "No books available. Please upload a book first."}) + "\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    # For database storage: use first book_id if single selection, null if multi
+    message_book_id = book_ids[0] if len(book_ids) == 1 else None
     
     user_message_lower = chat_message.message.lower()
     name_questions = ["what is your name", "who are you", "what's your name", "what are you called", "tell me your name"]
