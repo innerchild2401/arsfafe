@@ -55,6 +55,110 @@ def build_conversation_context(messages: List[dict]) -> str:
     
     return "\n\n".join(context_parts)
 
+async def classify_intent(
+    user_message: str,
+    conversation_history: List[dict],
+    client: OpenAI
+) -> dict:
+    """
+    Classify user intent using GPT-4o-mini to determine which path to take.
+    Returns: {
+        "path": "A" | "B" | "C" | "D",
+        "confidence": float (0.0-1.0),
+        "reasoning": str
+    }
+    Falls back to keyword matching if LLM call fails.
+    """
+    # Check if there's an existing artifact in conversation history
+    has_existing_artifact = any(
+        msg.get("artifact") for msg in conversation_history 
+        if msg.get("role") == "assistant" and msg.get("artifact")
+    )
+    
+    history_text = build_conversation_context(conversation_history) if conversation_history else ""
+    
+    classification_prompt = f"""You are an intent classifier for a RAG (Retrieval-Augmented Generation) system with 4 routing paths.
+
+**Path A (Specific Query)**: Factual questions asking for specific information
+- Examples: "What is X?", "When did Y happen?", "Who wrote Z?", "Where is X mentioned?"
+- Use: Hybrid search (vector + keyword) to find specific chunks
+
+**Path B (Global Query)**: Requests for book-level summaries or overviews
+- Examples: "What is this book about?", "Summarize the book", "Give me an overview"
+- Use: Pre-computed executive summaries (fast, no search needed)
+
+**Path C (Deep Reasoner)**: Complex analysis requiring reasoning
+- Examples: "Analyze X", "Compare A and B", "Why does X happen?", "How does X work?", "What is the relationship between X and Y?"
+- Use: Reasoning model (GPT-4o) for multi-step analysis
+
+**Path D (Action Planner)**: Requests to create plans, schedules, or implementation guides
+- Examples: "Create a plan for X", "Make a schedule", "How to implement Y", "Steps to do Z"
+- Use: Generate structured artifacts (checklists, notebooks, scripts)
+
+**IMPORTANT RULES:**
+1. If there's an existing artifact in conversation history AND the query is a follow-up question (asking about the artifact, not requesting a new one), route to Path A or B, NOT Path D.
+2. Follow-up indicators: "help with", "how do i", "what about", "explain", "day", "step", "percentage", etc.
+3. "How to" can be Path C (explanation) or Path D (implementation guide) - distinguish by context.
+4. "How does X work?" = Path C (reasoning), "How to do X?" = Path D (action plan)
+
+Conversation History:
+{history_text if history_text else "No previous conversation"}
+
+User Query: {user_message}
+
+Return ONLY a JSON object with this exact structure:
+{{
+  "path": "A" | "B" | "C" | "D",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation of why this path was chosen"
+}}
+
+No markdown, no code blocks, just the JSON object."""
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.chat_model,  # Use gpt-4o-mini (fast and cheap)
+            messages=[
+                {"role": "system", "content": "You are an intent classifier. Return ONLY valid JSON, no markdown, no explanations outside JSON."},
+                {"role": "user", "content": classification_prompt}
+            ],
+            temperature=0.1,  # Low temperature for consistency
+            max_tokens=150,  # Short response
+            response_format={"type": "json_object"}  # Force JSON output
+        )
+        
+        result_json = response.choices[0].message.content.strip()
+        # Remove any markdown code fences if present
+        if result_json.startswith("```"):
+            lines = result_json.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].strip() == "```":
+                lines = lines[:-1]
+            result_json = "\n".join(lines).strip()
+        
+        classification = json.loads(result_json)
+        
+        # Validate path
+        if classification.get("path") not in ["A", "B", "C", "D"]:
+            raise ValueError(f"Invalid path: {classification.get('path')}")
+        
+        # Validate confidence
+        confidence = classification.get("confidence", 0.5)
+        if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+            confidence = 0.5
+        
+        return {
+            "path": classification.get("path", "A"),
+            "confidence": confidence,
+            "reasoning": classification.get("reasoning", "")
+        }
+    except Exception as e:
+        print(f"⚠️ Intent classification failed: {str(e)}, falling back to keyword matching")
+        # Fall back to keyword matching (will be done in calling function)
+        return None
+
+
 async def rewrite_query_with_context(user_message: str, conversation_history: List[dict], client: OpenAI) -> str:
     """
     Rewrite user query to de-reference pronouns and contextual references
@@ -2691,62 +2795,57 @@ async def chat_stream(
     client = OpenAI(api_key=settings.openai_api_key)
     search_query = await rewrite_query_with_context(chat_message.message, conversation_history, client)
     
-    # Intent detection
-    reasoning_intent_keywords = [
-        "analyze", "analyse", "analysis", "compare", "comparison", "contrast",
-        "why", "how does", "how is", "how are", "what causes", "what leads to",
-        "connect", "connection", "relationship", "relate", "correlate",
-        "explain why", "what is the relationship", "what is the connection",
-        "difference between", "similarities between", "distinguish"
-    ]
-    is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
+    # INTENT CLASSIFICATION: Use LLM to classify intent (with keyword fallback)
+    intent_classification = await classify_intent(chat_message.message, conversation_history, client)
     
-    # Detect action planner intent (Path D)
-    action_planner_keywords = [
-        "plan", "schedule", "how to", "how do", "solve", "simulate", "simulation",
-        "script", "routine", "checklist", "steps", "step-by-step", "guide me",
-        "create a", "make a", "build a", "design a", "implement", "methodology",
-        "framework", "process", "procedure", "workflow"
-    ]
-    
-    # Check if there's an existing artifact in conversation history (follow-up detection)
-    has_existing_artifact = any(
-        msg.get("artifact") for msg in conversation_history 
-        if msg.get("role") == "assistant" and msg.get("artifact")
-    )
-    
-    # Follow-up question keywords (questions about existing artifacts, not new artifact requests)
-    follow_up_keywords = [
-        "help with", "how do i", "what about", "what is", "explain", "tell me about",
-        "day", "step", "percentage", "determine", "calculate", "figure out",
-        "i need help", "i don't understand", "can you explain", "what does",
-        "how does", "how is", "how are", "when should", "where do"
-    ]
-    
-    is_follow_up_about_artifact = (
-        has_existing_artifact and 
-        any(keyword in user_message_lower for keyword in follow_up_keywords)
-    )
-    
-    # Suppress Path D for follow-up questions about existing artifacts
-    is_action_planner_query = (
-        any(keyword in user_message_lower for keyword in action_planner_keywords) and 
-        not is_reasoning_query and 
-        not is_follow_up_about_artifact  # Don't trigger Path D for follow-ups
-    )
-    
-    if is_follow_up_about_artifact:
-        print(f"🔍 Follow-up detected about existing artifact. Suppressing Path D, routing to Path A/B instead.")
-    
-    global_intent_keywords = [
-        "summarize", "summarise", "summary", "overview", 
-        "what is this book about", "what is the book about", "what was the book about",
-        "what's this book about", "what's the book about", "what was this book about",
-        "tell me about this book", "describe this book", "describe the book",
-        "what does this book cover", "what does the book cover", "book summary",
-        "what is it about", "what was it about", "what's it about"
-    ]
-    is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
+    # Fallback to keyword matching if LLM classification failed
+    if intent_classification is None:
+        print("⚠️ Using keyword-based intent detection (LLM classification failed)")
+        # Fallback keyword matching
+        reasoning_intent_keywords = [
+            "analyze", "analyse", "analysis", "compare", "comparison", "contrast",
+            "why", "how does", "how is", "how are", "what causes", "what leads to",
+            "connect", "connection", "relationship", "relate", "correlate",
+            "explain why", "what is the relationship", "what is the connection",
+            "difference between", "similarities between", "distinguish"
+        ]
+        action_planner_keywords = [
+            "plan", "schedule", "how to", "how do", "solve", "simulate", "simulation",
+            "script", "routine", "checklist", "steps", "step-by-step", "guide me",
+            "create a", "make a", "build a", "design a", "implement", "methodology",
+            "framework", "process", "procedure", "workflow"
+        ]
+        global_intent_keywords = [
+            "summarize", "summarise", "summary", "overview", 
+            "what is this book about", "what is the book about", "what was the book about",
+            "what's this book about", "what's the book about", "what was this book about",
+            "tell me about this book", "describe this book", "describe the book",
+            "what does this book cover", "what does the book cover", "book summary",
+            "what is it about", "what was it about", "what's it about"
+        ]
+        
+        is_reasoning_query = any(keyword in user_message_lower for keyword in reasoning_intent_keywords)
+        is_action_planner_query = any(keyword in user_message_lower for keyword in action_planner_keywords) and not is_reasoning_query
+        is_global_query = any(keyword in user_message_lower for keyword in global_intent_keywords) and not is_reasoning_query and not is_action_planner_query
+        
+        # Determine path from keyword matching
+        if is_global_query:
+            selected_path = "B"
+        elif is_reasoning_query:
+            selected_path = "C"
+        elif is_action_planner_query:
+            selected_path = "D"
+        else:
+            selected_path = "A"
+    else:
+        # Use LLM classification
+        selected_path = intent_classification["path"]
+        print(f"🧠 Intent classified: Path {selected_path} (confidence: {intent_classification['confidence']:.2f}, reasoning: {intent_classification['reasoning']})")
+        
+        # Map path to boolean flags for compatibility
+        is_reasoning_query = (selected_path == "C")
+        is_action_planner_query = (selected_path == "D")
+        is_global_query = (selected_path == "B")
     
     # Debug logging for Path B detection
     if any(kw in user_message_lower for kw in ["book about", "book summary", "summarize", "overview"]):
